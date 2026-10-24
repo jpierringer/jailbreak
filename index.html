@@ -112,7 +112,7 @@ input.f::placeholder{color:#24382b}
 .seg button.on,.seg1.on{color:#021007;background:var(--grn)}
 .seg1{flex:0 0 86px;border:1px solid var(--line)}
 .capture{font-size:26px;padding:18px;letter-spacing:8px;margin-bottom:6px}
-.cap-note{font-size:11px;color:var(--mute);text-align:center;letter-spacing:1px;margin-bottom:14px}
+.cap-note{font-size:12px;color:var(--mute);text-align:center;letter-spacing:1px;line-height:1.5;margin:0 0 14px}
 .ct{display:flex;justify-content:space-between;gap:10px;padding:9px 0;border-top:1px solid var(--line);font-size:14px;letter-spacing:1px}
 .ct:first-child{border-top:0}
 .ct.live{color:var(--grn)}.ct.lost{color:var(--amb)}.ct.dim{color:var(--mute)}
@@ -163,8 +163,8 @@ body.dark #toast{background:#000;color:#8a2626;border-color:#2a0c0c}
 /* =========================================================
    CONFIG — paste your Supabase project URL and anon key
    ========================================================= */
-const SUPABASE_URL = 'https://sjwarllnehssyphoormc.supabase.co';
-const SUPABASE_ANON_KEY = 'sb_publishable_eGv0iwOKZ1DP6JixaXZnrQ_vI6nax4S';
+const SUPABASE_URL = 'YOUR_SUPABASE_URL';
+const SUPABASE_ANON_KEY = 'YOUR_SUPABASE_ANON_KEY';
 
 const CONFIGURED = !/^YOUR_/.test(SUPABASE_URL) && !/^YOUR_/.test(SUPABASE_ANON_KEY);
 const $app = document.getElementById('app');
@@ -213,12 +213,12 @@ let sb = null;
 const S = {
   user:null, gameId:null, game:null, players:[], me:null, offset:0, round:null,
   mode:null, modeKey:null, pollT:null, tickT:null, refreshing:false,
-  pickGuard:null, lobbyKey:'', endCalledAt:0, prevPhase:null,
+  pickGuards:[], lobbyKey:'', endCalledAt:0, prevPhase:null,
   gps:{ watch:null, fix:null, ok:false },
   heading:null, compassOn:false, headingUp:false, range:250,
   tx:{ last:null, lastT:0, sending:false, ok:null, err:'' },
   trail:new Map(), lastPosId:0, posPolling:false, lastPosPoll:0, contacts:[], lastContactsRender:0,
-  raf:null, scope:null, capCool:0, seen:new Set(), lastActivity:Date.now(), locked:false
+  raf:null, scope:null, caughtSeen:new Set(), caughtInit:false, seen:new Set(), lastActivity:Date.now(), locked:false
 };
 const now = () => Date.now() + S.offset;
 const isHost = () => S.game && S.user && S.game.host_id === S.user.id;
@@ -331,7 +331,7 @@ function enterGame(id, code){
 function leaveLocal(msg){
   clearInterval(S.pollT); S.pollT = null;
   teardown();
-  Object.assign(S, { gameId:null, game:null, players:[], me:null, mode:null, modeKey:null, round:null, pickGuard:null });
+  Object.assign(S, { gameId:null, game:null, players:[], me:null, mode:null, modeKey:null, round:null, pickGuards:[] });
   LS.del('jb_game'); LS.del('jb_code');
   history.replaceState(null, '', location.pathname);
   renderHome(msg || '');
@@ -362,7 +362,7 @@ function route(){
   const g = S.game, me = S.me;
   if(g.round !== S.round){
     S.round = g.round; S.endCalledAt = 0; S.trail = new Map(); S.lastPosId = 0; S.seen = new Set();
-    S.contacts = []; S.tx = { last:null, lastT:0, sending:false, ok:null, err:'' }; S.prevPhase = null;
+    S.contacts = []; S.caughtSeen = new Set(); S.caughtInit = false; S.tx = { last:null, lastT:0, sending:false, ok:null, err:'' }; S.prevPhase = null;
   }
   let kind;
   if(g.status === 'lobby') kind = 'lobby';
@@ -436,6 +436,7 @@ function renderHome(msg='', code=''){
   <div class="panel brief"><div class="lbl">Briefing</div>
     <p>One player is the <b class="amb">GUARD</b>. Everyone else is an <b>ESCAPED PRISONER</b>.</p>
     <p>Prisoners get a head start. Their phones leave a fading trail only the guard's radar can see.</p>
+    <p>To capture, the guard has to physically tag a prisoner. The tagged prisoner confirms it on their own phone.</p>
     <p>The guard wins by recapturing every prisoner. Prisoners win if anyone is still loose when time runs out.</p>
   </div>`;
 }
@@ -464,9 +465,9 @@ async function doJoin(){
 
 /* ---------- lobby ---------- */
 const SETTINGS = [
+  ['Guards','guard_count',[[1,'1'],[2,'2'],[3,'3'],[4,'4']]],
   ['Head start','headstart_sec',[[60,'1 MIN'],[120,'2 MIN'],[180,'3 MIN'],[300,'5 MIN']]],
   ['Op length','duration_sec',[[600,'10 MIN'],[900,'15 MIN'],[1200,'20 MIN'],[1800,'30 MIN']]],
-  ['Capture radius','catch_radius_m',[[10,'10 M'],[15,'15 M'],[25,'25 M']]],
   ['Radar','radar_mode',[['motion','MOTION ONLY'],['full','FULL TRACK']]],
   ['Scent trail','scent_sec',[[60,'1 MIN'],[120,'2 MIN'],[300,'5 MIN']]]
 ];
@@ -483,23 +484,29 @@ function settingRow([label, field, opts], host){
 RENDER.lobby = () => { S.lobbyKey = ''; UPDATE.lobby(); };
 UPDATE.lobby = () => {
   const g = S.game, host = isHost();
-  if(S.pickGuard && !S.players.some(p => p.user_id === S.pickGuard)) S.pickGuard = null;
-  const key = JSON.stringify([g.headstart_sec,g.duration_sec,g.catch_radius_m,g.radar_mode,g.scent_sec,g.host_id,g.round,
-    S.players.map(p => p.user_id + p.callsign), S.pickGuard, S.gps.ok, S.compassOn]);
+  const gc = g.guard_count || 1;
+  S.pickGuards = S.pickGuards.filter(id => S.players.some(p => p.user_id === id)).slice(0, gc);
+  const key = JSON.stringify([g.headstart_sec,g.duration_sec,gc,g.radar_mode,g.scent_sec,g.host_id,g.round,
+    S.players.map(p => p.user_id + p.callsign), S.pickGuards, S.gps.ok, S.compassOn]);
   if(key === S.lobbyKey) return;
   S.lobbyKey = key;
   const n = S.players.length;
+  const isG = id => S.pickGuards.includes(id);
+  const k = S.pickGuards.length, effG = Math.min(gc, Math.max(1, n - 1));
+  const guardNote = k === 0 ? `No guards picked. ${effG === 1 ? 'One will be' : effG + ' will be'} chosen at random.`
+    : k < effG ? `${k} of ${effG} guards picked. The rest will be chosen at random.`
+    : `${effG === 1 ? 'Guard' : 'All ' + effG + ' guards'} assigned. Everyone else escapes.`;
   $app.innerHTML = `
   <div class="op-head"><div><div class="lbl">Op code</div><div class="code">${esc(g.code)}</div></div>
     <button class="btn sm" data-act="share">SHARE</button></div>
   <div class="sub">ROUND ${g.round} · ${n} IN STAGING</div>
-  <div class="panel"><div class="lbl">Roster${host ? ' · tap to assign guard' : ''}</div>
+  <div class="panel"><div class="lbl">Roster${host ? ` · tap to assign guard${gc > 1 ? 's' : ''}` : ''}</div>
     <ul class="roster">${S.players.map(p => `
-      <li ${host ? `data-act="pick" data-v="${p.user_id}"` : ''} class="${S.pickGuard === p.user_id ? 'sel' : ''}">
+      <li ${host ? `data-act="pick" data-v="${p.user_id}"` : ''} class="${isG(p.user_id) ? 'sel' : ''}">
         <span>${esc(p.callsign)}</span>
-        <span class="tags">${S.pickGuard === p.user_id ? '<i class="amb">GUARD</i>' : ''}${p.user_id === g.host_id ? '<i>HOST</i>' : ''}${p.user_id === S.user.id ? '<i>YOU</i>' : ''}</span>
+        <span class="tags">${isG(p.user_id) ? '<i class="amb">GUARD</i>' : ''}${p.user_id === g.host_id ? '<i>HOST</i>' : ''}${p.user_id === S.user.id ? '<i>YOU</i>' : ''}</span>
       </li>`).join('')}</ul>
-    ${host ? `<div class="note">${S.pickGuard ? 'Guard assigned. Everyone else escapes.' : 'No guard picked. One will be chosen at random.'}</div>` : ''}
+    ${host ? `<div class="note">${guardNote}${gc > n - 1 && n >= 2 ? ` <span class="amb">Only ${n - 1} guard${n - 1 > 1 ? 's' : ''} possible with ${n} players.</span>` : ''}</div>` : ''}
   </div>
   <div class="panel"><div class="lbl">Rules of engagement</div>${SETTINGS.map(s => settingRow(s, host)).join('')}</div>
   <div class="panel"><div class="lbl">Systems check</div>
@@ -520,13 +527,14 @@ async function changeSetting(field, raw){
   S.game = next;
   const { error } = await sb.rpc('update_settings', {
     p_game:g.id, p_headstart:next.headstart_sec, p_duration:next.duration_sec,
-    p_radius:next.catch_radius_m, p_mode:next.radar_mode, p_scent:next.scent_sec
+    p_radius:next.catch_radius_m, p_mode:next.radar_mode, p_scent:next.scent_sec,
+    p_guards:next.guard_count || 1
   });
   if(error) toast(errMsg(error),'red');
   refresh();
 }
 async function doStart(){
-  const { error } = await sb.rpc('start_game', { p_game:S.game.id, p_guard:S.pickGuard });
+  const { error } = await sb.rpc('start_game', { p_game:S.game.id, p_guards:S.pickGuards });
   if(error){ toast(errMsg(error),'red'); return; }
   syncClock(); refresh();
 }
@@ -570,9 +578,10 @@ RENDER.prisoner = () => {
     <div class="p-row"><span id="pTx">○ STANDBY</span><span id="pAcc">GPS —</span></div>
     <div class="p-row"><span>AT LARGE</span><span id="pLeft">-</span></div>
     <div class="p-warn" id="pWarn"></div>
-    <button class="btn hold" data-hold="surrender" data-ms="2000">HOLD · I'VE BEEN CAUGHT</button>
+    <button class="btn hold" data-hold="surrender" data-ms="2000">HOLD · I'VE BEEN TAGGED</button>
     <ul class="p-tips">
       <li>Turn your brightness all the way down.</li>
+      <li>If the guard tags you, hold the button above. That's the only way you're captured.</li>
       <li>Keep this screen open. If your signal drops, the guard sees your last position.</li>
       <li>The screen blacks out after a few seconds. Hold the circle to bring it back.</li>
     </ul>
@@ -661,8 +670,7 @@ RENDER.guard = () => {
     <div class="seg" id="rangeSeg">${[50,100,250,500].map(r => `<button data-act="range" data-v="${r}" class="${S.range === r ? 'on' : ''}">${r}M</button>`).join('')}</div>
     <button class="seg1 ${S.headingUp ? 'on' : ''}" data-act="hdg" id="hdgBtn">${S.headingUp ? 'HDG-UP' : 'N-UP'}</button>
   </div>
-  <button class="btn solid capture" id="capBtn" data-act="capture" disabled>CAPTURE</button>
-  <div class="cap-note">Within ${g.catch_radius_m} m of a prisoner? Hit CAPTURE.</div>
+  <div class="cap-note">Radar gets you close. Find them and tag them by hand. They confirm on their phone.</div>
   <div class="panel"><div class="lbl">Contacts · ${g.radar_mode === 'motion' ? 'motion only' : 'full track'}</div><div id="contacts"></div></div>
   <div class="gps-line" id="gGps">ACQUIRING GPS…</div>
   ${hostAbort()}`;
@@ -719,6 +727,13 @@ function analyze(){
     out.push(c);
   }
   S.contacts = out;
+  for(const p of S.players){
+    if(p.role === 'prisoner' && p.status === 'caught' && !S.caughtSeen.has(p.user_id)){
+      if(S.caughtInit) { vib([100,60,300]); toast('CAPTURE CONFIRMED: ' + p.callsign); }
+      S.caughtSeen.add(p.user_id);
+    }
+  }
+  S.caughtInit = true;
   for(const c of out){
     if(c.state === 'live' && !S.seen.has(c.id)){ S.seen.add(c.id); vib(60); }
     if(c.state !== 'live') S.seen.delete(c.id);
@@ -732,7 +747,6 @@ TICK.guard = ph => {
     set('gClock', fmt(ph.left));
     const ov = $('hsOv'); if(ov) ov.classList.toggle('on', ph.p === 'head');
     if(ph.p === 'head') set('hsClock', fmt(ph.left));
-    const cb = $('capBtn'); if(cb) cb.disabled = ph.p !== 'hunt' || Date.now() < S.capCool;
   }
   const f = S.gps.fix;
   set('gGps', f ? `GPS ±${Math.round(f.acc)}M${S.heading != null ? ' · HDG ' + pad3(S.heading) + '°' : ''}` : 'ACQUIRING GPS…');
@@ -755,15 +769,6 @@ function renderContacts(){
     return `<div class="ct ${cls}"><span>${esc(c.callsign)}</span><span>${st}</span></div>`;
   }).join('');
   el.innerHTML = rows || '<div class="ct dim"><span>NO PRISONERS</span></div>';
-}
-async function doCapture(){
-  const ph = phase(); if(!ph || ph.p !== 'hunt' || Date.now() < S.capCool) return;
-  const f = S.gps.fix; if(!f){ toast('NO GPS FIX','amb'); return; }
-  S.capCool = Date.now() + 2500;
-  const { data, error } = await sb.rpc('capture', { p_game:S.game.id, p_lat:f.lat, p_lng:f.lng });
-  if(error){ toast(errMsg(error),'red'); return; }
-  if(data && data.caught){ vib([100,60,300]); toast('CAPTURED: ' + data.caught); refresh(); }
-  else toast(`NO PRISONER WITHIN ${S.game.catch_radius_m} M`,'amb');
 }
 async function toggleHeading(){
   if(!S.headingUp){
@@ -915,7 +920,7 @@ function drawScope(ts){
 RENDER.results = () => {
   const g = S.game, hunt = Date.parse(g.hunt_at);
   const pris = S.players.filter(p => p.role === 'prisoner');
-  const guard = S.players.find(p => p.user_id === g.guard_id);
+  const guards = S.players.filter(p => p.role === 'guard'), multi = guards.length > 1;
   const escaped = pris.filter(p => p.status === 'active').length;
   const gw = g.winner === 'guard';
   pris.sort((a,b) => (a.status === 'active' ? -1 : 0) - (b.status === 'active' ? -1 : 0) ||
@@ -923,15 +928,15 @@ RENDER.results = () => {
   $app.innerHTML = `
   <div class="res ${gw ? 'g' : 'p'}">
     <div class="lbl">Op complete · round ${g.round}</div>
-    <div class="res-big">${gw ? 'GUARD WINS' : 'PRISONERS WIN'}</div>
+    <div class="res-big">${gw ? (multi ? 'GUARDS WIN' : 'GUARD WINS') : 'PRISONERS WIN'}</div>
     <div class="res-sub ${gw ? 'amb' : 'grn'}">${gw ? 'ALL PRISONERS RECAPTURED IN ' + fmtUp(Date.parse(g.ends_at) - hunt) : `${escaped} OF ${pris.length} ESCAPED`}</div>
   </div>
   <div class="panel">
-    <div class="lbl">Guard</div>
-    <div class="ct ${gw ? 'live' : 'dim'}" style="color:${gw ? 'var(--amb)' : ''}"><span>${esc(guard ? guard.callsign : '—')}</span><span>${gw ? 'VICTORY' : 'OUTRUN'}</span></div>
+    <div class="lbl">${multi ? 'Guards' : 'Guard'}</div>
+    ${(guards.length ? guards : [{ callsign:'—' }]).map(gd => `<div class="ct ${gw ? 'live' : 'dim'}" style="color:${gw ? 'var(--amb)' : ''}"><span>${esc(gd.callsign)}</span><span>${gw ? 'VICTORY' : 'OUTRUN'}</span></div>`).join('')}
     <div class="lbl" style="margin-top:16px">Prisoners</div>
     ${pris.map(p => `<div class="ct ${p.status === 'active' ? 'live' : 'dim'}"><span>${esc(p.callsign)}</span><span>${
-      p.status === 'active' ? 'ESCAPED' : (p.caught_by === 'surrender' ? 'SURRENDERED ' : 'CAPTURED ') + fmtUp(Date.parse(p.caught_at) - hunt)
+      p.status === 'active' ? 'ESCAPED' : 'CAPTURED ' + fmtUp(Date.parse(p.caught_at) - hunt)
     }</span></div>`).join('')}
   </div>
   ${isHost() ? `<button class="btn solid" data-act="rematch">NEW ROUND</button>` : `<div class="wait">AWAITING HOST FOR NEXT ROUND…</div>`}
@@ -945,13 +950,19 @@ document.addEventListener('click', e => {
   if(act === 'create') doCreate();
   else if(act === 'join') doJoin();
   else if(act === 'share') doShare();
-  else if(act === 'pick'){ S.pickGuard = S.pickGuard === el.dataset.v ? null : el.dataset.v; UPDATE.lobby(); }
+  else if(act === 'pick'){
+    const id = el.dataset.v, gc = S.game.guard_count || 1;
+    if(S.pickGuards.includes(id)) S.pickGuards = S.pickGuards.filter(x => x !== id);
+    else if(gc === 1) S.pickGuards = [id];
+    else if(S.pickGuards.length < gc) S.pickGuards = [...S.pickGuards, id];
+    else toast(`ALREADY ${gc} GUARDS — TAP ONE TO REMOVE`,'amb');
+    UPDATE.lobby();
+  }
   else if(act === 'start') doStart();
   else if(act === 'leave') doLeave();
   else if(act === 'armgps') armGPS();
   else if(act === 'armcompass') ensureCompass().then(ok => { if(ok){ toast('COMPASS ARMED'); if(S.mode === 'lobby') UPDATE.lobby(); } });
   else if(act === 'rematch') doRematch();
-  else if(act === 'capture') doCapture();
   else if(act === 'hdg') toggleHeading();
   else if(act === 'range'){
     S.range = parseInt(el.dataset.v, 10);
