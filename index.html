@@ -7,8 +7,8 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="apple-mobile-web-app-title" content="Jail Break">
-<title>Jail Break</title>
+<meta name="apple-mobile-web-app-title" content="Night Hunt">
+<title>Night Hunt</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@500;700&family=Saira+Stencil+One&family=Share+Tech+Mono&display=swap" rel="stylesheet">
@@ -28,6 +28,13 @@ input{-webkit-user-select:text;user-select:text}
 body::after{content:"";position:fixed;inset:0;pointer-events:none;z-index:50;
   background:repeating-linear-gradient(0deg,rgba(0,0,0,.22) 0 1px,transparent 1px 3px)}
 body.dark{background:#000}
+body.apoc{--amb:#ff4a3d}
+.modepick{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px}
+.modepick button{background:transparent;border:1px solid var(--line);color:var(--mute);font-family:var(--sten);font-size:20px;letter-spacing:1px;padding:14px 6px;border-radius:0}
+.modepick button.on{color:#021007;background:var(--grn);border-color:var(--grn)}
+.modepick button.on.ap{background:#ff4a3d;border-color:#ff4a3d}
+.modename{font-family:var(--sten);font-size:22px;color:var(--grn);letter-spacing:1px;margin:0 0 14px}
+body.apoc .modename{color:#ff4a3d}
 body.dark::after{display:none}
 #app{max-width:520px;margin:0 auto;padding:calc(env(safe-area-inset-top) + 14px) 16px calc(env(safe-area-inset-bottom) + 28px)}
 b{font-weight:400}
@@ -221,6 +228,19 @@ const S = {
   raf:null, scope:null, caughtSeen:new Set(), caughtInit:false, seen:new Set(), lastActivity:Date.now(), locked:false
 };
 const now = () => Date.now() + S.offset;
+const TXT = {
+  jailbreak:{ name:'JAIL BREAK', hunter:'GUARD', hunters:'GUARDS', prey:'ESCAPED PRISONER', preys:'PRISONERS',
+    alive:'AT LARGE', tagged:"HOLD · I'VE BEEN TAGGED", tagTip:"If a guard tags you, hold the button above. That's the only way you're captured.",
+    hunting:'GUARD IS HUNTING', escaping:'PRISONERS ESCAPING', hold:'HOLD POSITION', scatter:'ESCAPING',
+    outBig:'CAPTURED', outMsg:'Return to the yard. The op continues without you.', confirm:'CAPTURE CONFIRMED: ',
+    note:'Radar gets you close. Find them and tag them by hand. They confirm on their phone.', startCount:'Guards' },
+  apocalypse:{ name:'APOCALYPSE', hunter:'ZOMBIE', hunters:'ZOMBIES', prey:'SURVIVOR', preys:'SURVIVORS',
+    alive:'ALIVE', tagged:"HOLD · I'VE BEEN BITTEN", tagTip:'If a zombie tags you, hold the button above. You turn and join the horde.',
+    hunting:'THE HORDE IS HUNTING', escaping:'SURVIVORS SCATTERING', hold:'THE DEAD ARE WAKING', scatter:'SCATTERING',
+    outBig:'TURNED', outMsg:'You are one of them now.', confirm:'INFECTED: ',
+    note:'Tag survivors by hand. Every bite adds a zombie to the horde.', startCount:'Starting zombies' }
+};
+const T = () => TXT[(S.game && S.game.game_mode) === 'apocalypse' ? 'apocalypse' : 'jailbreak'];
 const isHost = () => S.game && S.user && S.game.host_id === S.user.id;
 
 function phase(){
@@ -370,14 +390,17 @@ function route(){
   else if(me.role === 'guard') kind = 'guard';
   else if(me.role === 'prisoner' && me.status === 'active') kind = 'prisoner';
   else kind = 'captured';
+  document.body.classList.toggle('apoc', g.game_mode === 'apocalypse');
   const key = kind + ':' + g.round;
   if(key !== S.modeKey){
     const prev = S.mode;
     teardown();
     S.mode = kind; S.modeKey = key;
     if(prev === 'prisoner' && kind === 'captured') vib([300,100,300]);
+    const turned = prev === 'prisoner' && kind === 'guard';
     if(kind === 'results') vib([120,80,120,80,400]);
     RENDER[kind]();
+    if(turned){ vib([500,150,500]); toast("YOU'VE BEEN INFECTED — HUNT THE LIVING",'red'); }
   } else if(UPDATE[kind]) UPDATE[kind]();
 }
 
@@ -412,7 +435,7 @@ const RENDER = {}, UPDATE = {}, TICK = {};
 /* ---------- setup / home ---------- */
 function renderSetup(){
   $app.innerHTML = `
-  <div class="brand"><div class="logo">JAIL<span>BREAK</span></div><div class="tag">SYSTEM NOT CONFIGURED</div></div>
+  <div class="brand"><div class="logo">NIGHT<span>HUNT</span></div><div class="tag">SYSTEM NOT CONFIGURED</div></div>
   <div class="panel setup"><div class="lbl">SETUP</div><ol>
     <li>Run <code>jailbreak_setup.sql</code> in the Supabase SQL Editor.</li>
     <li>Settings → API → Exposed schemas: add <code>jailbreak</code>.</li>
@@ -425,7 +448,7 @@ function renderHome(msg='', code=''){
   teardown(); S.mode = 'home'; S.modeKey = null;
   const cs = LS.get('jb_callsign') || '';
   $app.innerHTML = `
-  <div class="brand"><div class="logo">JAIL<span>BREAK</span></div><div class="tag">NIGHT PURSUIT OPS</div></div>
+  <div class="brand"><div class="logo">NIGHT<span>HUNT</span></div><div class="tag">JAIL BREAK · APOCALYPSE</div></div>
   <div class="panel"><div class="lbl">Your callsign</div>
     <input class="f" id="cs" maxlength="12" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="VIPER" value="${esc(cs)}"></div>
   <div class="panel"><div class="lbl">Join an op</div>
@@ -433,11 +456,13 @@ function renderHome(msg='', code=''){
     <button class="btn" style="width:auto" data-act="join">JOIN</button></div></div>
   <button class="btn solid" data-act="create">CREATE NEW OP</button>
   ${msg ? `<div class="err">${esc(msg)}</div>` : ''}
-  <div class="panel brief"><div class="lbl">Briefing</div>
-    <p>One player is the <b class="amb">GUARD</b>. Everyone else is an <b>ESCAPED PRISONER</b>.</p>
-    <p>Prisoners get a head start. Their phones leave a fading trail only the guard's radar can see.</p>
-    <p>To capture, the guard has to physically tag a prisoner. The tagged prisoner confirms it on their own phone.</p>
-    <p>The guard wins by recapturing every prisoner. Prisoners win if anyone is still loose when time runs out.</p>
+  <div class="panel brief"><div class="lbl">Jail Break</div>
+    <p><b class="amb">GUARDS</b> hunt <b>ESCAPED PRISONERS</b>. Prisoners' phones leave a fading trail only the guards' radar can see.</p>
+    <p>Guards tag by hand; the prisoner confirms. Prisoners win if anyone is still loose when time runs out.</p>
+  </div>
+  <div class="panel brief"><div class="lbl">Apocalypse</div>
+    <p>It starts with one <b style="color:#ff4a3d">ZOMBIE</b>. Every survivor who gets bitten turns and joins the hunt.</p>
+    <p>Will anyone still be human when the clock runs out?</p>
   </div>`;
 }
 
@@ -473,6 +498,7 @@ const SETTINGS = [
 ];
 function settingRow([label, field, opts], host){
   const cur = S.game[field];
+  if(field === 'guard_count') label = T().startCount;
   if(host){
     return `<div class="setrow"><span>${label}</span><select data-set="${field}">${
       opts.map(([v,t]) => `<option value="${v}" ${String(v)===String(cur)?'selected':''}>${t}</option>`).join('')
@@ -486,27 +512,32 @@ UPDATE.lobby = () => {
   const g = S.game, host = isHost();
   const gc = g.guard_count || 1;
   S.pickGuards = S.pickGuards.filter(id => S.players.some(p => p.user_id === id)).slice(0, gc);
-  const key = JSON.stringify([g.headstart_sec,g.duration_sec,gc,g.radar_mode,g.scent_sec,g.host_id,g.round,
+  const key = JSON.stringify([g.game_mode,g.headstart_sec,g.duration_sec,gc,g.radar_mode,g.scent_sec,g.host_id,g.round,
     S.players.map(p => p.user_id + p.callsign), S.pickGuards, S.gps.ok, S.compassOn]);
   if(key === S.lobbyKey) return;
   S.lobbyKey = key;
   const n = S.players.length;
   const isG = id => S.pickGuards.includes(id);
   const k = S.pickGuards.length, effG = Math.min(gc, Math.max(1, n - 1));
-  const guardNote = k === 0 ? `No guards picked. ${effG === 1 ? 'One will be' : effG + ' will be'} chosen at random.`
-    : k < effG ? `${k} of ${effG} guards picked. The rest will be chosen at random.`
-    : `${effG === 1 ? 'Guard' : 'All ' + effG + ' guards'} assigned. Everyone else escapes.`;
+  const hn = T().hunter.toLowerCase(), hns = T().hunters.toLowerCase();
+  const guardNote = k === 0 ? `No ${hns} picked. ${effG === 1 ? 'One will be' : effG + ' will be'} chosen at random.`
+    : k < effG ? `${k} of ${effG} ${hns} picked. The rest will be chosen at random.`
+    : `${effG === 1 ? T().hunter[0] + hn.slice(1) : 'All ' + effG + ' ' + hns} assigned. Everyone else runs.`;
   $app.innerHTML = `
   <div class="op-head"><div><div class="lbl">Op code</div><div class="code">${esc(g.code)}</div></div>
     <button class="btn sm" data-act="share">SHARE</button></div>
   <div class="sub">ROUND ${g.round} · ${n} IN STAGING</div>
-  <div class="panel"><div class="lbl">Roster${host ? ` · tap to assign guard${gc > 1 ? 's' : ''}` : ''}</div>
+  ${host ? `<div class="modepick">
+      <button data-act="gmode" data-v="jailbreak" class="${g.game_mode !== 'apocalypse' ? 'on' : ''}">JAIL BREAK</button>
+      <button data-act="gmode" data-v="apocalypse" class="ap ${g.game_mode === 'apocalypse' ? 'on' : ''}">APOCALYPSE</button>
+    </div>` : `<div class="modename">${T().name}</div>`}
+  <div class="panel"><div class="lbl">Roster${host ? ` · tap to assign ${T().hunter.toLowerCase()}${gc > 1 ? 's' : ''}` : ''}</div>
     <ul class="roster">${S.players.map(p => `
       <li ${host ? `data-act="pick" data-v="${p.user_id}"` : ''} class="${isG(p.user_id) ? 'sel' : ''}">
         <span>${esc(p.callsign)}</span>
-        <span class="tags">${isG(p.user_id) ? '<i class="amb">GUARD</i>' : ''}${p.user_id === g.host_id ? '<i>HOST</i>' : ''}${p.user_id === S.user.id ? '<i>YOU</i>' : ''}</span>
+        <span class="tags">${isG(p.user_id) ? `<i class="amb">${T().hunter}</i>` : ''}${p.user_id === g.host_id ? '<i>HOST</i>' : ''}${p.user_id === S.user.id ? '<i>YOU</i>' : ''}</span>
       </li>`).join('')}</ul>
-    ${host ? `<div class="note">${guardNote}${gc > n - 1 && n >= 2 ? ` <span class="amb">Only ${n - 1} guard${n - 1 > 1 ? 's' : ''} possible with ${n} players.</span>` : ''}</div>` : ''}
+    ${host ? `<div class="note">${guardNote}${gc > n - 1 && n >= 2 ? ` <span class="amb">Only ${n - 1} ${n - 1 > 1 ? hns : hn} possible with ${n} players.</span>` : ''}</div>` : ''}
   </div>
   <div class="panel"><div class="lbl">Rules of engagement</div>${SETTINGS.map(s => settingRow(s, host)).join('')}</div>
   <div class="panel"><div class="lbl">Systems check</div>
@@ -514,7 +545,7 @@ UPDATE.lobby = () => {
       <button class="btn sm ${S.gps.ok ? 'ok' : ''}" data-act="armgps">${S.gps.ok ? 'GPS ✓' : 'ARM GPS'}</button>
       <button class="btn sm ${S.compassOn ? 'ok' : ''}" data-act="armcompass">${S.compassOn ? 'COMPASS ✓' : 'ARM COMPASS'}</button>
     </div>
-    <div class="note">Everyone arm GPS now. Compass helps if you end up as guard.${'wakeLock' in navigator ? ' The app keeps your screen awake during the op.' : ' <span class="amb">This browser can\'t keep the screen awake — set Auto-Lock to Never before the op.</span>'}</div>
+    <div class="note">Everyone arm GPS now. Compass helps if you end up hunting.${'wakeLock' in navigator ? ' The app keeps your screen awake during the op.' : ' <span class="amb">This browser can\'t keep the screen awake — set Auto-Lock to Never before the op.</span>'}</div>
   </div>
   ${host
     ? `<button class="btn solid" data-act="start" ${n < 2 ? 'disabled' : ''}>${n < 2 ? 'NEED 2+ PLAYERS' : 'START OP'}</button>`
@@ -522,13 +553,13 @@ UPDATE.lobby = () => {
   <button class="btn sm ghost" data-act="leave">LEAVE OP</button>`;
 };
 async function changeSetting(field, raw){
-  const g = S.game; const v = field === 'radar_mode' ? raw : parseInt(raw, 10);
+  const g = S.game; const v = (field === 'radar_mode' || field === 'game_mode') ? raw : parseInt(raw, 10);
   const next = { ...g, [field]:v };
   S.game = next;
   const { error } = await sb.rpc('update_settings', {
     p_game:g.id, p_headstart:next.headstart_sec, p_duration:next.duration_sec,
     p_radius:next.catch_radius_m, p_mode:next.radar_mode, p_scent:next.scent_sec,
-    p_guards:next.guard_count || 1
+    p_guards:next.guard_count || 1, p_game_mode:next.game_mode || 'jailbreak'
   });
   if(error) toast(errMsg(error),'red');
   refresh();
@@ -572,16 +603,16 @@ RENDER.prisoner = () => {
   document.body.classList.add('dark');
   $app.innerHTML = `
   <div class="pris">
-    <div class="p-id">ESCAPED PRISONER<b>${esc(S.me.callsign)}</b></div>
+    <div class="p-id">${T().prey}<b>${esc(S.me.callsign)}</b></div>
     <div class="p-phase" id="pPhase">—</div>
     <div class="p-clock" id="pClock">--:--</div>
     <div class="p-row"><span id="pTx">○ STANDBY</span><span id="pAcc">GPS —</span></div>
-    <div class="p-row"><span>AT LARGE</span><span id="pLeft">-</span></div>
+    <div class="p-row"><span>${T().alive}</span><span id="pLeft">-</span></div>
     <div class="p-warn" id="pWarn"></div>
-    <button class="btn hold" data-hold="surrender" data-ms="2000">HOLD · I'VE BEEN TAGGED</button>
+    <button class="btn hold" data-hold="surrender" data-ms="2000">${T().tagged}</button>
     <ul class="p-tips">
       <li>Turn your brightness all the way down.</li>
-      <li>If the guard tags you, hold the button above. That's the only way you're captured.</li>
+      <li>${T().tagTip}</li>
       <li>Keep this screen open. If your signal drops, the guard sees your last position.</li>
       <li>The screen blacks out after a few seconds. Hold the circle to bring it back.</li>
     </ul>
@@ -611,12 +642,13 @@ async function maybeSend(){
   else { t.ok = true; t.err = ''; t.last = { lat:f.lat, lng:f.lng }; t.lastT = Date.now(); }
 }
 const atLarge = () => {
-  const pr = S.players.filter(p => p.role === 'prisoner');
-  return `${pr.filter(p => p.status === 'active').length}/${pr.length}`;
+  const alive = S.players.filter(p => p.role === 'prisoner' && p.status === 'active').length;
+  const total = S.players.filter(p => p.role === 'prisoner' || p.caught_by === 'infected').length;
+  return `${alive}/${total}`;
 };
 TICK.prisoner = ph => {
   if(!ph) return;
-  set('pPhase', ph.p === 'head' ? 'HEAD START — RUN' : ph.p === 'hunt' ? 'GUARD IS HUNTING' : 'TIME');
+  set('pPhase', ph.p === 'head' ? 'HEAD START — RUN' : ph.p === 'hunt' ? T().hunting : 'TIME');
   set('pClock', fmt(ph.left)); set('lClock', fmt(ph.left));
   set('pLeft', atLarge());
   const f = S.gps.fix, t = S.tx;
@@ -641,10 +673,10 @@ RENDER.captured = () => {
   $app.innerHTML = `
   <div class="capd">
     <div class="lbl">STATUS</div>
-    <div class="big">${spect ? 'STAND BY' : 'CAPTURED'}</div>
-    <p>${spect ? 'You\'re sitting this round out.' : 'Return to the yard. The op continues without you.'}</p>
+    <div class="big">${spect ? 'STAND BY' : T().outBig}</div>
+    <p>${spect ? 'You\'re sitting this round out.' : T().outMsg}</p>
     <div class="p-row"><span id="cPhase">—</span><span id="cClock">--:--</span></div>
-    <div class="p-row"><span>AT LARGE</span><span id="cLeft">-</span></div>
+    <div class="p-row"><span>${T().alive}</span><span id="cLeft">-</span></div>
     ${hostAbort()}
   </div>`;
   TICK.captured(phase());
@@ -660,17 +692,17 @@ RENDER.guard = () => {
   const g = S.game;
   $app.innerHTML = `
   <div class="hud">
-    <div><div class="lbl">Role</div><div class="hv amb">GUARD</div></div>
+    <div><div class="lbl">Role</div><div class="hv amb">${T().hunter}</div></div>
     <div class="ctr"><div class="lbl" id="gPhase">—</div><div class="clock" id="gClock">--:--</div></div>
-    <div class="rt"><div class="lbl">At large</div><div class="hv" id="gLeft">-</div></div>
+    <div class="rt"><div class="lbl">${T().alive}</div><div class="hv" id="gLeft">-</div></div>
   </div>
   <div class="scope-wrap"><canvas id="scope"></canvas>
-    <div class="overlay" id="hsOv"><div>PRISONERS ESCAPING</div><div class="big" id="hsClock">--:--</div><div>HOLD POSITION</div></div></div>
+    <div class="overlay" id="hsOv"><div>${T().escaping}</div><div class="big" id="hsClock">--:--</div><div>${T().hold}</div></div></div>
   <div class="ctl">
     <div class="seg" id="rangeSeg">${[50,100,250,500].map(r => `<button data-act="range" data-v="${r}" class="${S.range === r ? 'on' : ''}">${r}M</button>`).join('')}</div>
     <button class="seg1 ${S.headingUp ? 'on' : ''}" data-act="hdg" id="hdgBtn">${S.headingUp ? 'HDG-UP' : 'N-UP'}</button>
   </div>
-  <div class="cap-note">Radar gets you close. Find them and tag them by hand. They confirm on their phone.</div>
+  <div class="cap-note">${T().note}</div>
   <div class="panel"><div class="lbl">Contacts · ${g.radar_mode === 'motion' ? 'motion only' : 'full track'}</div><div id="contacts"></div></div>
   <div class="gps-line" id="gGps">ACQUIRING GPS…</div>
   ${hostAbort()}`;
@@ -728,8 +760,8 @@ function analyze(){
   }
   S.contacts = out;
   for(const p of S.players){
-    if(p.role === 'prisoner' && p.status === 'caught' && !S.caughtSeen.has(p.user_id)){
-      if(S.caughtInit) { vib([100,60,300]); toast('CAPTURE CONFIRMED: ' + p.callsign); }
+    if(p.caught_at && !S.caughtSeen.has(p.user_id)){
+      if(S.caughtInit) { vib([100,60,300]); toast(T().confirm + p.callsign); }
       S.caughtSeen.add(p.user_id);
     }
   }
@@ -761,14 +793,14 @@ function renderContacts(){
   const rows = list.map(c => {
     let st, cls;
     if(c.status !== 'active'){ st = 'CAPTURED ' + (c.caught_at ? fmtUp(Date.parse(c.caught_at) - hunt) : ''); cls = 'dim strike'; }
-    else if(ph && ph.p === 'head'){ st = 'ESCAPING'; cls = 'dim'; }
+    else if(ph && ph.p === 'head'){ st = T().scatter; cls = 'dim'; }
     else if(c.state === 'live'){ st = c.dist != null ? `${fmtDist(c.dist)} · ${pad3(c.brg)}°${c.moving ? ' · MOVING' : ''}` : 'LIVE'; cls = 'live'; }
     else if(c.state === 'lost'){ st = 'SIG LOST' + (c.dist != null ? ` · ${fmtDist(c.dist)} · ${pad3(c.brg)}°` : ''); cls = 'lost'; }
     else if(c.state === 'nodata'){ st = 'NO SIGNAL'; cls = 'dim'; }
     else { st = 'NO CONTACT'; cls = 'dim'; }
     return `<div class="ct ${cls}"><span>${esc(c.callsign)}</span><span>${st}</span></div>`;
   }).join('');
-  el.innerHTML = rows || '<div class="ct dim"><span>NO PRISONERS</span></div>';
+  el.innerHTML = rows || `<div class="ct dim"><span>NO ${T().preys} LEFT</span></div>`;
 }
 async function toggleHeading(){
   if(!S.headingUp){
@@ -918,29 +950,50 @@ function drawScope(ts){
 
 /* ---------- results ---------- */
 RENDER.results = () => {
-  const g = S.game, hunt = Date.parse(g.hunt_at);
+  const g = S.game, hunt = Date.parse(g.hunt_at), gw = g.winner === 'guard';
+  const t = (p) => fmtUp(Date.parse(p.caught_at) - hunt);
+  const row = (cls, name, right, style='') => `<div class="ct ${cls}" ${style}><span>${esc(name)}</span><span>${right}</span></div>`;
+  const tail = `${isHost() ? `<button class="btn solid" data-act="rematch">NEW ROUND</button>` : `<div class="wait">AWAITING HOST FOR NEXT ROUND…</div>`}
+  <button class="btn sm ghost" data-act="leave">LEAVE OP</button>`;
+
+  if(g.game_mode === 'apocalypse'){
+    const zero = S.players.filter(p => p.role === 'guard' && p.caught_by !== 'infected');
+    const turned = S.players.filter(p => p.caught_by === 'infected').sort((a,b) => Date.parse(a.caught_at) - Date.parse(b.caught_at));
+    const alive = S.players.filter(p => p.role === 'prisoner' && p.status === 'active');
+    const total = alive.length + turned.length;
+    const last = turned[turned.length - 1];
+    $app.innerHTML = `
+    <div class="res ${gw ? 'g' : 'p'}">
+      <div class="lbl">Apocalypse · round ${g.round}</div>
+      <div class="res-big">${gw ? 'HUMANITY HAS FALLEN' : 'HUMANS SURVIVE'}</div>
+      <div class="res-sub ${gw ? 'amb' : 'grn'}">${gw ? (last ? 'LAST SURVIVOR TURNED AT ' + t(last) : 'NO SURVIVORS') : `${alive.length} OF ${total} MADE IT`}</div>
+    </div>
+    <div class="panel">
+      <div class="lbl">Patient zero</div>
+      ${zero.map(p => row('', p.callsign, 'ORIGIN', 'style="color:var(--amb)"')).join('')}
+      ${turned.length ? `<div class="lbl" style="margin-top:16px">Turned</div>${turned.map(p => row('dim', p.callsign, 'BITTEN ' + t(p))).join('')}` : ''}
+      ${alive.length ? `<div class="lbl" style="margin-top:16px">Survivors</div>${alive.map(p => row('live', p.callsign, 'SURVIVED')).join('')}` : ''}
+    </div>${tail}`;
+    return;
+  }
+
   const pris = S.players.filter(p => p.role === 'prisoner');
   const guards = S.players.filter(p => p.role === 'guard'), multi = guards.length > 1;
   const escaped = pris.filter(p => p.status === 'active').length;
-  const gw = g.winner === 'guard';
   pris.sort((a,b) => (a.status === 'active' ? -1 : 0) - (b.status === 'active' ? -1 : 0) ||
     Date.parse(b.caught_at || 0) - Date.parse(a.caught_at || 0));
   $app.innerHTML = `
   <div class="res ${gw ? 'g' : 'p'}">
-    <div class="lbl">Op complete · round ${g.round}</div>
+    <div class="lbl">Jail Break · round ${g.round}</div>
     <div class="res-big">${gw ? (multi ? 'GUARDS WIN' : 'GUARD WINS') : 'PRISONERS WIN'}</div>
     <div class="res-sub ${gw ? 'amb' : 'grn'}">${gw ? 'ALL PRISONERS RECAPTURED IN ' + fmtUp(Date.parse(g.ends_at) - hunt) : `${escaped} OF ${pris.length} ESCAPED`}</div>
   </div>
   <div class="panel">
     <div class="lbl">${multi ? 'Guards' : 'Guard'}</div>
-    ${(guards.length ? guards : [{ callsign:'—' }]).map(gd => `<div class="ct ${gw ? 'live' : 'dim'}" style="color:${gw ? 'var(--amb)' : ''}"><span>${esc(gd.callsign)}</span><span>${gw ? 'VICTORY' : 'OUTRUN'}</span></div>`).join('')}
+    ${guards.map(gd => row(gw ? 'live' : 'dim', gd.callsign, gw ? 'VICTORY' : 'OUTRUN', gw ? 'style="color:var(--amb)"' : '')).join('')}
     <div class="lbl" style="margin-top:16px">Prisoners</div>
-    ${pris.map(p => `<div class="ct ${p.status === 'active' ? 'live' : 'dim'}"><span>${esc(p.callsign)}</span><span>${
-      p.status === 'active' ? 'ESCAPED' : 'CAPTURED ' + fmtUp(Date.parse(p.caught_at) - hunt)
-    }</span></div>`).join('')}
-  </div>
-  ${isHost() ? `<button class="btn solid" data-act="rematch">NEW ROUND</button>` : `<div class="wait">AWAITING HOST FOR NEXT ROUND…</div>`}
-  <button class="btn sm ghost" data-act="leave">LEAVE OP</button>`;
+    ${pris.map(p => row(p.status === 'active' ? 'live' : 'dim', p.callsign, p.status === 'active' ? 'ESCAPED' : 'CAPTURED ' + t(p))).join('')}
+  </div>${tail}`;
 };
 
 /* ---------- input ---------- */
@@ -950,12 +1003,13 @@ document.addEventListener('click', e => {
   if(act === 'create') doCreate();
   else if(act === 'join') doJoin();
   else if(act === 'share') doShare();
+  else if(act === 'gmode'){ if(S.game.game_mode !== el.dataset.v) changeSetting('game_mode', el.dataset.v); }
   else if(act === 'pick'){
     const id = el.dataset.v, gc = S.game.guard_count || 1;
     if(S.pickGuards.includes(id)) S.pickGuards = S.pickGuards.filter(x => x !== id);
     else if(gc === 1) S.pickGuards = [id];
     else if(S.pickGuards.length < gc) S.pickGuards = [...S.pickGuards, id];
-    else toast(`ALREADY ${gc} GUARDS — TAP ONE TO REMOVE`,'amb');
+    else toast(`ALREADY ${gc} ${T().hunters} — TAP ONE TO REMOVE`,'amb');
     UPDATE.lobby();
   }
   else if(act === 'start') doStart();
