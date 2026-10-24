@@ -122,7 +122,7 @@ input.f::placeholder{color:#24382b}
 .cap-note{font-size:12px;color:var(--mute);text-align:center;letter-spacing:1px;line-height:1.5;margin:0 0 14px}
 .ct{display:flex;justify-content:space-between;gap:10px;padding:9px 0;border-top:1px solid var(--line);font-size:14px;letter-spacing:1px}
 .ct:first-child{border-top:0}
-.ct.live{color:var(--grn)}.ct.lost{color:var(--amb)}.ct.dim{color:var(--mute)}
+.ct.live{color:var(--grn)}.ct.sq{color:#5abeff}.ct.lost{color:var(--amb)}.ct.dim{color:var(--mute)}
 .ct.strike span:first-child{text-decoration:line-through}
 .gps-line{font-size:11px;color:var(--mute);letter-spacing:2px;text-align:center;margin-bottom:14px}
 
@@ -425,7 +425,7 @@ function tick(){
     if(S.mode === 'guard') toast('HUNT IS LIVE');
   }
   S.prevPhase = ph ? ph.p : null;
-  if(S.mode === 'prisoner') maybeSend();
+  if(S.mode === 'prisoner' || S.mode === 'guard') maybeSend();
   if(S.mode === 'guard') pollPositions();
   if(TICK[S.mode]) TICK[S.mode](ph);
 }
@@ -704,9 +704,10 @@ RENDER.guard = () => {
   </div>
   <div class="cap-note">${T().note}</div>
   <div class="panel"><div class="lbl">Contacts · ${g.radar_mode === 'motion' ? 'motion only' : 'full track'}</div><div id="contacts"></div></div>
+  <div class="panel" id="squadPanel" style="display:none"><div class="lbl">Squad</div><div id="squad"></div></div>
   <div class="gps-line" id="gGps">ACQUIRING GPS…</div>
   ${hostAbort()}`;
-  startGPS();
+  startGPS(() => maybeSend());
   keepAwake(true);
   setupScope();
   S.lastContactsRender = 0;
@@ -784,6 +785,19 @@ TICK.guard = ph => {
   set('gGps', f ? `GPS ±${Math.round(f.acc)}M${S.heading != null ? ' · HDG ' + pad3(S.heading) + '°' : ''}` : 'ACQUIRING GPS…');
   if(Date.now() - S.lastContactsRender > 1000){ S.lastContactsRender = Date.now(); renderContacts(); }
 };
+// other hunters on my side
+function squad(){
+  const n = now();
+  return S.players.filter(p => p.role === 'guard' && p.user_id !== S.user.id).map(p => {
+    const arr = S.trail.get(p.user_id) || [];
+    // ignore points sent before they turned (apocalypse)
+    const turnedAt = p.caught_at ? Date.parse(p.caught_at) : 0;
+    let L = null; for(let i = arr.length - 1; i >= 0; i--){ if(arr[i].t >= turnedAt){ L = arr[i]; break; } }
+    const m = { id:p.user_id, callsign:p.callsign, last:L };
+    if(L){ m.age = n - L.t; if(S.gps.fix){ m.dist = distM(S.gps.fix, L); m.brg = bearing(S.gps.fix, L); } }
+    return m;
+  });
+}
 function renderContacts(){
   const el = $('contacts'); if(!el) return;
   const ph = phase(), g = S.game, hunt = Date.parse(g.hunt_at);
@@ -801,6 +815,17 @@ function renderContacts(){
     return `<div class="ct ${cls}"><span>${esc(c.callsign)}</span><span>${st}</span></div>`;
   }).join('');
   el.innerHTML = rows || `<div class="ct dim"><span>NO ${T().preys} LEFT</span></div>`;
+  const sq = squad(), sp = $('squadPanel'), se = $('squad');
+  if(sp && se){
+    sp.style.display = sq.length ? '' : 'none';
+    se.innerHTML = sq.map(m => {
+      let st;
+      if(!m.last) st = 'NO SIGNAL';
+      else if(m.age > 30000) st = `STALE ${Math.round(m.age/1000)}S` + (m.dist != null ? ` · ${fmtDist(m.dist)}` : '');
+      else st = m.dist != null ? `${fmtDist(m.dist)} · ${pad3(m.brg)}°` : 'LIVE';
+      return `<div class="ct ${m.last && m.age <= 30000 ? 'sq' : 'dim'}"><span>${esc(m.callsign)}</span><span>${st}</span></div>`;
+    }).join('');
+  }
 }
 async function toggleHeading(){
   if(!S.headingUp){
@@ -835,7 +860,7 @@ function drawScope(ts){
   S.raf = requestAnimationFrame(drawScope);
   const { ctx, size } = S.scope; if(!size) return;
   const cx = size/2, cy = size/2, R = size/2 - 6;
-  const G = '61,255,139', A = '255,176,32';
+  const G = '61,255,139', A = '255,176,32', F = '90,190,255';
   const rotDeg = (S.headingUp && S.heading != null) ? S.heading : 0;
   const rr = rotDeg * Math.PI/180;
   const FONT = '"Share Tech Mono", monospace';
@@ -893,6 +918,16 @@ function drawScope(ts){
       }
     }
 
+    // friendly hunters
+    for(const m of squad()){
+      if(!m.last || m.age > 90000) continue;
+      let s = P(m.last), edge = false;
+      if(s.d > S.range){ s = toRim(s); edge = true; }
+      const fresh = m.age <= 30000, al = fresh ? 0.95 : 0.4;
+      ctx.strokeStyle = `rgba(${F},${al})`; ctx.fillStyle = `rgba(${F},${al * 0.35})`; ctx.lineWidth = 1.5;
+      ctx.beginPath(); ctx.rect(s.x - 5, s.y - 5, 10, 10); ctx.fill(); ctx.stroke();
+      label(m.callsign + (edge ? ' ' + fmtDist(m.dist || 0) : '') + (fresh ? '' : ' ?'), s, `rgba(${F},${al})`);
+    }
     // contacts
     for(const c of S.contacts){
       if(c.status !== 'active' || !c.last) continue;
