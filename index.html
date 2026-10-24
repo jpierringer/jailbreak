@@ -29,10 +29,12 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;z-index:50;
   background:repeating-linear-gradient(0deg,rgba(0,0,0,.22) 0 1px,transparent 1px 3px)}
 body.dark{background:#000}
 body.apoc{--amb:#ff4a3d}
-.modepick{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px}
-.modepick button{background:transparent;border:1px solid var(--line);color:var(--mute);font-family:var(--sten);font-size:20px;letter-spacing:1px;padding:14px 6px;border-radius:0}
+.modepick{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:14px}
+.modepick button{background:transparent;border:1px solid var(--line);color:var(--mute);font-family:var(--sten);font-size:16px;letter-spacing:1px;padding:14px 4px;border-radius:0}
 .modepick button.on{color:#021007;background:var(--grn);border-color:var(--grn)}
 .modepick button.on.ap{background:#ff4a3d;border-color:#ff4a3d}
+.modepick button.on.ts{background:#ffb020;border-color:#ffb020}
+.diag .ct{font-size:12px}.diag .sub2{font-size:11px;color:var(--mute);letter-spacing:1px;margin:10px 0 2px}
 .modename{font-family:var(--sten);font-size:22px;color:var(--grn);letter-spacing:1px;margin:0 0 14px}
 body.apoc .modename{color:#ff4a3d}
 body.dark::after{display:none}
@@ -240,7 +242,12 @@ const TXT = {
     outBig:'TURNED', outMsg:'You are one of them now.', confirm:'INFECTED: ',
     note:'Tag survivors by hand. Every bite adds a zombie to the horde.', startCount:'Starting zombies' }
 };
-const T = () => TXT[(S.game && S.game.game_mode) === 'apocalypse' ? 'apocalypse' : 'jailbreak'];
+TXT.test = { ...TXT.jailbreak, name:'TEST RANGE', roleTag:'TEST', hunter:'OPERATOR', hunters:'OPERATORS', alive:'OPERATORS',
+  scatter:'—', confirm:'', note:'Test range: every phone transmits and tracks every other phone. No winner. Walk around and compare.' };
+const T = () => TXT[(S.game && TXT[S.game.game_mode]) ? S.game.game_mode : 'jailbreak'];
+const isTest = () => !!(S.game && S.game.game_mode === 'test');
+// who shows up as a tracked contact on my radar
+const isTarget = p => isTest() ? (p.role === 'guard' && p.user_id !== S.user.id) : p.role === 'prisoner';
 const isHost = () => S.game && S.user && S.game.host_id === S.user.id;
 
 function phase(){
@@ -258,7 +265,10 @@ function startGPS(cb){
   S.gps.watch = navigator.geolocation.watchPosition(p => {
     const c = p.coords;
     const fix = { lat:c.latitude, lng:c.longitude, acc:c.accuracy || 0, t:Date.now() };
-    S.gps.ok = true; S.gps.fix = fix; cb && cb(fix);
+    S.gps.ok = true; S.gps.fix = fix;
+    (S.gps.times = S.gps.times || []).push(fix.t);
+    while(S.gps.times.length && S.gps.times[0] < fix.t - 60000) S.gps.times.shift();
+    cb && cb(fix);
   }, err => {
     if(err.code === 1) toast('LOCATION BLOCKED — ALLOW IT IN BROWSER SETTINGS','red');
   }, { enableHighAccuracy:true, maximumAge:0, timeout:20000 });
@@ -463,6 +473,9 @@ function renderHome(msg='', code=''){
   <div class="panel brief"><div class="lbl">Apocalypse</div>
     <p>It starts with one <b style="color:#ff4a3d">ZOMBIE</b>. Every survivor who gets bitten turns and joins the hunt.</p>
     <p>Will anyone still be human when the clock runs out?</p>
+  </div>
+  <div class="panel brief"><div class="lbl">Test range</div>
+    <p>No game. Everyone transmits and tracks everyone, with live GPS diagnostics. Use it to check accuracy and radar behavior.</p>
   </div>`;
 }
 
@@ -530,16 +543,17 @@ UPDATE.lobby = () => {
   ${host ? `<div class="modepick">
       <button data-act="gmode" data-v="jailbreak" class="${g.game_mode !== 'apocalypse' ? 'on' : ''}">JAIL BREAK</button>
       <button data-act="gmode" data-v="apocalypse" class="ap ${g.game_mode === 'apocalypse' ? 'on' : ''}">APOCALYPSE</button>
+      <button data-act="gmode" data-v="test" class="ts ${g.game_mode === 'test' ? 'on' : ''}">TEST</button>
     </div>` : `<div class="modename">${T().name}</div>`}
-  <div class="panel"><div class="lbl">Roster${host ? ` · tap to assign ${T().hunter.toLowerCase()}${gc > 1 ? 's' : ''}` : ''}</div>
+  <div class="panel"><div class="lbl">Roster${host && !isTest() ? ` · tap to assign ${T().hunter.toLowerCase()}${gc > 1 ? 's' : ''}` : ''}</div>
     <ul class="roster">${S.players.map(p => `
-      <li ${host ? `data-act="pick" data-v="${p.user_id}"` : ''} class="${isG(p.user_id) ? 'sel' : ''}">
+       <li ${host && !isTest() ? `data-act="pick" data-v="${p.user_id}"` : ''} class="${isG(p.user_id) ? 'sel' : ''}">
         <span>${esc(p.callsign)}</span>
         <span class="tags">${isG(p.user_id) ? `<i class="amb">${T().hunter}</i>` : ''}${p.user_id === g.host_id ? '<i>HOST</i>' : ''}${p.user_id === S.user.id ? '<i>YOU</i>' : ''}</span>
       </li>`).join('')}</ul>
-    ${host ? `<div class="note">${guardNote}${gc > n - 1 && n >= 2 ? ` <span class="amb">Only ${n - 1} ${n - 1 > 1 ? hns : hn} possible with ${n} players.</span>` : ''}</div>` : ''}
+    ${isTest() ? `<div class="note">Everyone is an operator. No head start, no winner. Each phone sees all the others.</div>` : host ? `<div class="note">${guardNote}${gc > n - 1 && n >= 2 ? ` <span class="amb">Only ${n - 1} ${n - 1 > 1 ? hns : hn} possible with ${n} players.</span>` : ''}</div>` : ''}
   </div>
-  <div class="panel"><div class="lbl">Rules of engagement</div>${SETTINGS.map(s => settingRow(s, host)).join('')}</div>
+  <div class="panel"><div class="lbl">Rules of engagement</div>${SETTINGS.filter(s => !isTest() || !['guard_count','headstart_sec'].includes(s[1])).map(s => settingRow(s, host)).join('')}</div>
   <div class="panel"><div class="lbl">Systems check</div>
     <div class="row2">
       <button class="btn sm ${S.gps.ok ? 'ok' : ''}" data-act="armgps">${S.gps.ok ? 'GPS ✓' : 'ARM GPS'}</button>
@@ -548,7 +562,8 @@ UPDATE.lobby = () => {
     <div class="note">Everyone arm GPS now. Compass helps if you end up hunting.${'wakeLock' in navigator ? ' The app keeps your screen awake during the op.' : ' <span class="amb">This browser can\'t keep the screen awake — set Auto-Lock to Never before the op.</span>'}</div>
   </div>
   ${host
-    ? `<button class="btn solid" data-act="start" ${n < 2 ? 'disabled' : ''}>${n < 2 ? 'NEED 2+ PLAYERS' : 'START OP'}</button>`
+    ? (isTest() ? `<button class="btn solid" data-act="start">START TEST</button>`
+       : `<button class="btn solid" data-act="start" ${n < 2 ? 'disabled' : ''}>${n < 2 ? 'NEED 2+ PLAYERS' : 'START OP'}</button>`)
     : `<div class="wait">STANDING BY FOR HOST…</div>`}
   <button class="btn sm ghost" data-act="leave">LEAVE OP</button>`;
 };
@@ -639,7 +654,7 @@ async function maybeSend(){
   });
   t.sending = false;
   if(error){ t.ok = false; t.err = errMsg(error); t.lastT = Date.now() - 7000; }
-  else { t.ok = true; t.err = ''; t.last = { lat:f.lat, lng:f.lng }; t.lastT = Date.now(); }
+  else { t.ok = true; t.err = ''; t.last = { lat:f.lat, lng:f.lng }; t.lastT = Date.now(); t.count = (t.count || 0) + 1; }
 }
 const atLarge = () => {
   const alive = S.players.filter(p => p.role === 'prisoner' && p.status === 'active').length;
@@ -692,7 +707,7 @@ RENDER.guard = () => {
   const g = S.game;
   $app.innerHTML = `
   <div class="hud">
-    <div><div class="lbl">Role</div><div class="hv amb">${T().hunter}</div></div>
+    <div><div class="lbl">Role</div><div class="hv amb">${T().roleTag || T().hunter}</div></div>
     <div class="ctr"><div class="lbl" id="gPhase">—</div><div class="clock" id="gClock">--:--</div></div>
     <div class="rt"><div class="lbl">${T().alive}</div><div class="hv" id="gLeft">-</div></div>
   </div>
@@ -704,6 +719,7 @@ RENDER.guard = () => {
   </div>
   <div class="cap-note">${T().note}</div>
   <div class="panel"><div class="lbl">Contacts · ${g.radar_mode === 'motion' ? 'motion only' : 'full track'}</div><div id="contacts"></div></div>
+  ${isTest() ? `<div class="panel diag"><div class="lbl">Diagnostics</div><div id="diag"></div></div>` : ''}
   <div class="panel" id="squadPanel" style="display:none"><div class="lbl">Squad</div><div id="squad"></div></div>
   <div class="gps-line" id="gGps">ACQUIRING GPS…</div>
   ${hostAbort()}`;
@@ -737,7 +753,7 @@ async function pollPositions(){
 function analyze(){
   const g = S.game, n = now(), ph = phase(), out = [];
   for(const p of S.players){
-    if(p.role !== 'prisoner') continue;
+    if(!isTarget(p)) continue;
     const c = { id:p.user_id, callsign:p.callsign, status:p.status, caught_at:p.caught_at };
     const arr = S.trail.get(p.user_id) || [], L = arr[arr.length - 1];
     c.last = L || null;
@@ -774,9 +790,9 @@ function analyze(){
 }
 TICK.guard = ph => {
   analyze();
-  set('gLeft', atLarge());
+  set('gLeft', isTest() ? String(S.players.length) : atLarge());
   if(ph){
-    set('gPhase', ph.p === 'head' ? 'HEAD START' : 'HUNT');
+    set('gPhase', ph.p === 'head' ? 'HEAD START' : isTest() ? 'LIVE' : 'HUNT');
     set('gClock', fmt(ph.left));
     const ov = $('hsOv'); if(ov) ov.classList.toggle('on', ph.p === 'head');
     if(ph.p === 'head') set('hsClock', fmt(ph.left));
@@ -785,9 +801,32 @@ TICK.guard = ph => {
   set('gGps', f ? `GPS ±${Math.round(f.acc)}M${S.heading != null ? ' · HDG ' + pad3(S.heading) + '°' : ''}` : 'ACQUIRING GPS…');
   if(Date.now() - S.lastContactsRender > 1000){ S.lastContactsRender = Date.now(); renderContacts(); }
 };
+function renderDiag(){
+  const el = $('diag'); if(!el) return;
+  const n = now(), f = S.gps.fix, t = S.tx;
+  const row = (a, b) => `<div class="ct"><span>${a}</span><span>${b}</span></div>`;
+  const mine = [
+    row('MY GPS', f ? `±${Math.round(f.acc)}M · FIX ${((Date.now() - f.t)/1000).toFixed(1)}S AGO` : 'NO FIX'),
+    row('FIXES / MIN', String((S.gps.times || []).length)),
+    row('SENT', t.ok === false ? 'FAILING: ' + esc(t.err) : `${t.count || 0} · LAST ${t.lastT ? Math.round((Date.now() - t.lastT)/1000) + 'S AGO' : '—'}`),
+    row('HEADING', S.heading != null ? pad3(S.heading) + '°' : (S.compassOn ? 'NO DATA' : 'COMPASS OFF')),
+    row('CLOCK OFFSET', `${Math.round(S.offset)} MS`)
+  ].join('');
+  const others = S.players.filter(isTarget).map(p => {
+    const arr = S.trail.get(p.user_id) || [], L = arr[arr.length - 1];
+    if(!L) return row(esc(p.callsign), 'NO DATA YET');
+    const perMin = arr.filter(x => x.t > n - 60000).length;
+    let spd = '—';
+    for(let i = arr.length - 2; i >= 0; i--){ const dt = (L.t - arr[i].t)/1000; if(dt >= 2){ spd = (distM(arr[i], L)/dt).toFixed(1) + 'M/S'; break; } }
+    const d = f ? ` · ${fmtDist(distM(f, L))}` : '';
+    return row(esc(p.callsign), `±${Math.round(L.acc)}M · ${Math.round((n - L.t)/1000)}S · ${perMin}/MIN · ${spd}${d}`);
+  }).join('');
+  el.innerHTML = mine + `<div class="sub2">OTHER PHONES · ACC · LAST PING · PINGS/MIN · SPEED · DIST</div>` + (others || row('—', 'NO OTHER OPERATORS'));
+}
 // other hunters on my side
 function squad(){
   const n = now();
+  if(isTest()) return [];
   return S.players.filter(p => p.role === 'guard' && p.user_id !== S.user.id).map(p => {
     const arr = S.trail.get(p.user_id) || [];
     // ignore points sent before they turned (apocalypse)
@@ -815,6 +854,7 @@ function renderContacts(){
     return `<div class="ct ${cls}"><span>${esc(c.callsign)}</span><span>${st}</span></div>`;
   }).join('');
   el.innerHTML = rows || `<div class="ct dim"><span>NO ${T().preys} LEFT</span></div>`;
+  renderDiag();
   const sq = squad(), sp = $('squadPanel'), se = $('squad');
   if(sp && se){
     sp.style.display = sq.length ? '' : 'none';
@@ -907,7 +947,7 @@ function drawScope(ts){
 
     // scent trails
     for(const p of S.players){
-      if(p.role !== 'prisoner' || p.status !== 'active') continue;
+      if(!isTarget(p) || p.status !== 'active') continue;
       const arr = S.trail.get(p.user_id); if(!arr) continue;
       for(const pt of arr){
         const age = n - pt.t; if(age > scent) continue;
@@ -991,6 +1031,13 @@ RENDER.results = () => {
   const tail = `${isHost() ? `<button class="btn solid" data-act="rematch">NEW ROUND</button>` : `<div class="wait">AWAITING HOST FOR NEXT ROUND…</div>`}
   <button class="btn sm ghost" data-act="leave">LEAVE OP</button>`;
 
+  if(g.game_mode === 'test'){
+    $app.innerHTML = `
+    <div class="res g"><div class="lbl">Test range · round ${g.round}</div><div class="res-big">TEST COMPLETE</div>
+      <div class="res-sub amb">${S.players.length} OPERATOR${S.players.length === 1 ? '' : 'S'}</div></div>
+    <div class="panel">${S.players.map(p => row('', p.callsign, 'OPERATOR')).join('')}</div>${tail}`;
+    return;
+  }
   if(g.game_mode === 'apocalypse'){
     const zero = S.players.filter(p => p.role === 'guard' && p.caught_by !== 'infected');
     const turned = S.players.filter(p => p.caught_by === 'infected').sort((a,b) => Date.parse(a.caught_at) - Date.parse(b.caught_at));
