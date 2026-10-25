@@ -9,6 +9,10 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="Night Hunt">
 <title>Night Hunt</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icon-180.png">
+<link rel="icon" type="image/png" sizes="32x32" href="favicon-32.png">
+<link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@500;700&family=Saira+Stencil+One&family=Share+Tech+Mono&display=swap" rel="stylesheet">
@@ -156,6 +160,17 @@ input.f::placeholder{color:#24382b}
 .setup ol{padding-left:18px;font-size:13px;line-height:1.7;margin:0}
 .setup code{color:var(--amb)}
 
+.install{border:1px dashed var(--grn2);padding:12px 14px;margin-bottom:14px;font-size:13px;line-height:1.55}
+.install b{color:var(--grn)}
+.install .btn{margin:10px 0 0}
+.gpshelp{position:fixed;left:0;right:0;bottom:0;z-index:65;display:none;background:#140606;border-top:2px solid var(--red);
+  padding:16px 18px calc(env(safe-area-inset-bottom) + 16px);color:#f3c9c9;font-size:13px;line-height:1.55;max-height:80vh;overflow:auto}
+.gpshelp.on{display:block}
+.gpshelp h3{margin:0 0 6px;font-family:var(--head);font-size:20px;letter-spacing:3px;color:var(--red)}
+.gpshelp ol{margin:6px 0 12px;padding-left:18px}
+.gpshelp .btn{margin:6px 0 0}
+.btn.bad{color:var(--red);border-color:#5e1a1a}
+.tags i.g{color:var(--grn);border-color:var(--grn2)} .tags i.r{color:var(--red);border-color:#5e1a1a}
 #toast{position:fixed;left:50%;bottom:calc(env(safe-area-inset-bottom) + 24px);transform:translate(-50%,20px);opacity:0;pointer-events:none;
   transition:.2s;background:#06110a;border:1px solid var(--grn2);color:var(--grn);padding:11px 16px;font-size:14px;letter-spacing:2px;z-index:70;max-width:90vw;text-align:center}
 #toast.show{opacity:1;transform:translate(-50%,0)}
@@ -167,6 +182,7 @@ body.dark #toast{background:#000;color:#8a2626;border-color:#2a0c0c}
 <body>
 <div id="app"></div>
 <div id="toast"></div>
+<div id="gpsHelp" class="gpshelp"></div>
 <script>
 'use strict';
 /* =========================================================
@@ -269,8 +285,9 @@ function startGPS(cb){
     (S.gps.times = S.gps.times || []).push(fix.t);
     while(S.gps.times.length && S.gps.times[0] < fix.t - 60000) S.gps.times.shift();
     cb && cb(fix);
+    if(S.gps.denied){ S.gps.denied = false; showGpsHelp(false); }
   }, err => {
-    if(err.code === 1) toast('LOCATION BLOCKED — ALLOW IT IN BROWSER SETTINGS','red');
+    if(err.code === 1){ S.gps.denied = true; showGpsHelp(true); }
   }, { enableHighAccuracy:true, maximumAge:0, timeout:20000 });
 }
 function stopGPS(){
@@ -466,6 +483,7 @@ function renderHome(msg='', code=''){
     <button class="btn" style="width:auto" data-act="join">JOIN</button></div></div>
   <button class="btn solid" data-act="create">CREATE NEW OP</button>
   ${msg ? `<div class="err">${esc(msg)}</div>` : ''}
+  ${installHint()}
   <div class="panel brief"><div class="lbl">Jail Break</div>
     <p><b class="amb">GUARDS</b> hunt <b>ESCAPED PRISONERS</b>. Prisoners' phones leave a fading trail only the guards' radar can see.</p>
     <p>Guards tag by hand; the prisoner confirms. Prisoners win if anyone is still loose when time runs out.</p>
@@ -479,6 +497,18 @@ function renderHome(msg='', code=''){
   </div>`;
 }
 
+let deferredInstall = null;
+window.addEventListener('beforeinstallprompt', e => { e.preventDefault(); deferredInstall = e; if(S.mode === 'home') renderHome('', ($('code') || {}).value || ''); });
+window.addEventListener('appinstalled', () => { deferredInstall = null; toast('INSTALLED — OPEN IT FROM YOUR HOME SCREEN'); });
+function installHint(){
+  if(isStandalone() || LS.get('jb_hide_install')) return '';
+  const ua = navigator.userAgent, ios = /iPhone|iPad|iPod/.test(ua);
+  if(deferredInstall) return `<div class="install"><b>Install Night Hunt</b> as an app: full screen, its own icon, no browser bar.
+    <button class="btn" data-act="install">INSTALL APP</button><button class="btn sm ghost" data-act="noinstall">NOT NOW</button></div>`;
+  if(ios && !/CriOS|FxiOS/.test(ua)) return `<div class="install"><b>Add to Home Screen</b> for full screen and its own icon: tap the <b>Share</b> button, then <b>Add to Home Screen</b>.
+    <button class="btn sm ghost" data-act="noinstall">GOT IT</button></div>`;
+  return '';
+}
 function getCallsign(){
   const el = $('cs'); const v = (el ? el.value : '').trim().toUpperCase().replace(/\s+/g,' ');
   if(!v){ toast('ENTER A CALLSIGN','amb'); el && el.focus(); return null; }
@@ -520,13 +550,13 @@ function settingRow([label, field, opts], host){
   const m = opts.find(([v]) => String(v) === String(cur));
   return `<div class="setrow"><span>${label}</span><span class="v">${m ? m[1] : esc(cur)}</span></div>`;
 }
-RENDER.lobby = () => { S.lobbyKey = ''; UPDATE.lobby(); };
+RENDER.lobby = () => { S.lobbyKey = ''; UPDATE.lobby(); autoArm(); };
 UPDATE.lobby = () => {
   const g = S.game, host = isHost();
   const gc = g.guard_count || 1;
   S.pickGuards = S.pickGuards.filter(id => S.players.some(p => p.user_id === id)).slice(0, gc);
   const key = JSON.stringify([g.game_mode,g.headstart_sec,g.duration_sec,gc,g.radar_mode,g.scent_sec,g.host_id,g.round,
-    S.players.map(p => p.user_id + p.callsign), S.pickGuards, S.gps.ok, S.compassOn]);
+    S.players.map(p => p.user_id + p.callsign + p.gps_ok), S.pickGuards, S.gps.ok, S.gps.lobbyMsg, S.gps.acc, S.compassOn]);
   if(key === S.lobbyKey) return;
   S.lobbyKey = key;
   const n = S.players.length;
@@ -541,7 +571,7 @@ UPDATE.lobby = () => {
     <button class="btn sm" data-act="share">SHARE</button></div>
   <div class="sub">ROUND ${g.round} · ${n} IN STAGING</div>
   ${host ? `<div class="modepick">
-      <button data-act="gmode" data-v="jailbreak" class="${g.game_mode !== 'apocalypse' ? 'on' : ''}">JAIL BREAK</button>
+      <button data-act="gmode" data-v="jailbreak" class="${!g.game_mode || g.game_mode === 'jailbreak' ? 'on' : ''}">JAIL BREAK</button>
       <button data-act="gmode" data-v="apocalypse" class="ap ${g.game_mode === 'apocalypse' ? 'on' : ''}">APOCALYPSE</button>
       <button data-act="gmode" data-v="test" class="ts ${g.game_mode === 'test' ? 'on' : ''}">TEST</button>
     </div>` : `<div class="modename">${T().name}</div>`}
@@ -549,18 +579,23 @@ UPDATE.lobby = () => {
     <ul class="roster">${S.players.map(p => `
        <li ${host && !isTest() ? `data-act="pick" data-v="${p.user_id}"` : ''} class="${isG(p.user_id) ? 'sel' : ''}">
         <span>${esc(p.callsign)}</span>
-        <span class="tags">${isG(p.user_id) ? `<i class="amb">${T().hunter}</i>` : ''}${p.user_id === g.host_id ? '<i>HOST</i>' : ''}${p.user_id === S.user.id ? '<i>YOU</i>' : ''}</span>
+        <span class="tags">${isG(p.user_id) ? `<i class="amb">${T().hunter}</i>` : ''}${p.user_id === g.host_id ? '<i>HOST</i>' : ''}${p.user_id === S.user.id ? '<i>YOU</i>' : ''}${p.gps_ok ? '<i class="g">GPS</i>' : '<i class="r">NO GPS</i>'}</span>
       </li>`).join('')}</ul>
     ${isTest() ? `<div class="note">Everyone is an operator. No head start, no winner. Each phone sees all the others.</div>` : host ? `<div class="note">${guardNote}${gc > n - 1 && n >= 2 ? ` <span class="amb">Only ${n - 1} ${n - 1 > 1 ? hns : hn} possible with ${n} players.</span>` : ''}</div>` : ''}
   </div>
   <div class="panel"><div class="lbl">Rules of engagement</div>${SETTINGS.filter(s => !isTest() || !['guard_count','headstart_sec'].includes(s[1])).map(s => settingRow(s, host)).join('')}</div>
   <div class="panel"><div class="lbl">Systems check</div>
     <div class="row2">
-      <button class="btn sm ${S.gps.ok ? 'ok' : ''}" data-act="armgps">${S.gps.ok ? 'GPS ✓' : 'ARM GPS'}</button>
+      <button class="btn sm ${S.gps.ok ? 'ok' : S.gps.denied ? 'bad' : ''}" data-act="armgps">${
+        S.gps.ok ? `GPS ✓${S.gps.acc ? ' ±' + Math.round(S.gps.acc) + 'M' : ''}` : S.gps.denied ? 'GPS BLOCKED' : S.gps.lobbyMsg || 'ARM GPS'}</button>
       <button class="btn sm ${S.compassOn ? 'ok' : ''}" data-act="armcompass">${S.compassOn ? 'COMPASS ✓' : 'ARM COMPASS'}</button>
     </div>
-    <div class="note">Everyone arm GPS now. Compass helps if you end up hunting.${'wakeLock' in navigator ? ' The app keeps your screen awake during the op.' : ' <span class="amb">This browser can\'t keep the screen awake — set Auto-Lock to Never before the op.</span>'}</div>
+    ${S.gps.ok && S.gps.acc > 500 ? `<div class="note" style="color:var(--amb)">Accuracy is ±${Math.round(S.gps.acc)} m — Precise Location is probably off for this browser. Turn it on in the phone's Location settings.</div>` : ''}
+    ${S.gps.denied ? `<div class="note" style="color:var(--red)">Location is blocked on this phone. Tap GPS BLOCKED for how to fix it.</div>` : ''}
+    <div class="note">Everyone arm GPS now — the roster shows who still needs to. Compass helps if you end up hunting.${'wakeLock' in navigator ? ' The app keeps your screen awake during the op.' : ' <span class="amb">This browser can\'t keep the screen awake — set Auto-Lock to Never before the op.</span>'}</div>
   </div>
+  ${(() => { const missing = S.players.filter(p => !p.gps_ok).map(p => esc(p.callsign));
+      return host && missing.length ? `<div class="note" style="color:var(--amb);margin:-4px 0 12px">No GPS yet: ${missing.join(', ')}. They need to tap ARM GPS (and allow location) before you start.</div>` : ''; })()}
   ${host
     ? (isTest() ? `<button class="btn solid" data-act="start">START TEST</button>`
        : `<button class="btn solid" data-act="start" ${n < 2 ? 'disabled' : ''}>${n < 2 ? 'NEED 2+ PLAYERS' : 'START OP'}</button>`)
@@ -590,13 +625,64 @@ function doShare(){
   else if(navigator.clipboard) navigator.clipboard.writeText(url).then(() => toast('LINK COPIED'));
   else toast(url);
 }
-function armGPS(){
+function armGPS(quiet){
   if(!('geolocation' in navigator)){ toast('NO GPS ON THIS DEVICE','red'); return; }
+  if(S.gps.arming) return;
+  S.gps.arming = true; S.gps.lobbyMsg = 'ACQUIRING…'; if(S.mode === 'lobby') UPDATE.lobby();
   navigator.geolocation.getCurrentPosition(p => {
-    S.gps.ok = true; toast(`GPS LOCKED ±${Math.round(p.coords.accuracy)} M`);
+    S.gps.arming = false; S.gps.ok = true; S.gps.denied = false; showGpsHelp(false);
+    S.gps.acc = p.coords.accuracy; S.gps.lobbyMsg = '';
+    if(!quiet) toast(`GPS LOCKED ±${Math.round(p.coords.accuracy)} M`);
+    reportGps(true);
     if(S.mode === 'lobby') UPDATE.lobby();
-  }, err => toast(err.code === 1 ? 'LOCATION BLOCKED — ALLOW IT IN SETTINGS' : 'NO GPS FIX YET — TRY OUTSIDE','red'),
-  { enableHighAccuracy:true, timeout:15000, maximumAge:0 });
+  }, err => {
+    S.gps.arming = false;
+    if(err.code === 1){ S.gps.denied = true; S.gps.lobbyMsg = 'BLOCKED'; showGpsHelp(true); reportGps(false); }
+    else { S.gps.lobbyMsg = 'NO FIX — TAP TO RETRY'; if(!quiet) toast('NO GPS FIX YET — STEP OUTSIDE AND RETRY','amb'); }
+    if(S.mode === 'lobby') UPDATE.lobby();
+  }, { enableHighAccuracy:true, timeout:15000, maximumAge:0 });
+}
+function reportGps(ok){
+  if(!S.game || !S.me || S.me.gps_ok === ok) return;
+  sb.rpc('set_gps', { p_game:S.game.id, p_ok:ok }).then(() => refresh());
+}
+// if this site already has permission, arm silently when entering the lobby
+async function autoArm(){
+  try{
+    if(S.gps.ok || !navigator.permissions) return;
+    const st = await navigator.permissions.query({ name:'geolocation' });
+    if(st.state === 'granted') armGPS(true);
+    else if(st.state === 'denied'){ S.gps.denied = true; S.gps.lobbyMsg = 'BLOCKED'; if(S.mode === 'lobby') UPDATE.lobby(); }
+  }catch(e){}
+}
+const isStandalone = () => window.navigator.standalone === true || (window.matchMedia && matchMedia('(display-mode: standalone)').matches);
+function gpsHelpSteps(){
+  const ua = navigator.userAgent, ios = /iPhone|iPad|iPod/.test(ua) || (/Macintosh/.test(ua) && 'ontouchend' in document);
+  if(ios && /CriOS/.test(ua)) return [
+    'Open the iPhone <b>Settings</b> app → <b>Apps</b> → <b>Chrome</b> → <b>Location</b> → <b>While Using the App</b>.',
+    'In the same screen, turn <b>Precise Location</b> on.',
+    'Come back here and tap <b>Reload</b>.'];
+  if(ios && isStandalone()) return [
+    'Open the iPhone <b>Settings</b> app → <b>Privacy &amp; Security</b> → <b>Location Services</b> (on) → <b>Safari Websites</b> → <b>While Using the App</b>, and turn on <b>Precise Location</b>.',
+    'Close Night Hunt fully (swipe it away) and open it again from your home screen. Tap <b>Allow</b> when asked.'];
+  if(ios) return [
+    'In Safari, tap the page menu button in the address bar (the <b>aA</b> icon) → <b>Website Settings</b> → <b>Location</b> → <b>Allow</b>.',
+    'If that doesn\'t help: <b>Settings</b> → <b>Privacy &amp; Security</b> → <b>Location Services</b> (on) → <b>Safari Websites</b> → <b>While Using the App</b>, and turn on <b>Precise Location</b>.',
+    'Come back here and tap <b>Reload</b>. Tap <b>Allow</b> if asked.'];
+  return [
+    'Tap the icon at the left of the address bar → <b>Permissions</b> (or <b>Site settings</b>) → <b>Location</b> → <b>Allow</b>.',
+    'Make sure the phone\'s <b>Location</b> is on (swipe down from the top) and set to high accuracy.',
+    'Tap <b>Reload</b>.'];
+}
+function showGpsHelp(on){
+  const el = $('gpsHelp'); if(!el) return;
+  if(!on){ el.classList.remove('on'); return; }
+  el.innerHTML = `<h3>LOCATION BLOCKED</h3>
+    <div>This phone has blocked location for this site, so it can't play. To fix it:</div>
+    <ol>${gpsHelpSteps().map(s => `<li>${s}</li>`).join('')}</ol>
+    <button class="btn solid" data-act="reload">RELOAD</button>
+    <button class="btn sm ghost" data-act="hidegps">HIDE</button>`;
+  el.classList.add('on');
 }
 async function doLeave(){
   if(S.game && S.game.status === 'lobby'){
@@ -1096,7 +1182,11 @@ document.addEventListener('click', e => {
   }
   else if(act === 'start') doStart();
   else if(act === 'leave') doLeave();
-  else if(act === 'armgps') armGPS();
+  else if(act === 'armgps'){ if(S.gps.denied) showGpsHelp(true); else armGPS(); }
+  else if(act === 'reload') location.reload();
+  else if(act === 'install' && deferredInstall){ deferredInstall.prompt(); deferredInstall.userChoice.finally(() => { deferredInstall = null; if(S.mode === 'home') renderHome(); }); }
+  else if(act === 'noinstall'){ LS.set('jb_hide_install', '1'); const el = e.target.closest('.install'); if(el) el.remove(); }
+  else if(act === 'hidegps') showGpsHelp(false);
   else if(act === 'armcompass') ensureCompass().then(ok => { if(ok){ toast('COMPASS ARMED'); if(S.mode === 'lobby') UPDATE.lobby(); } });
   else if(act === 'rematch') doRematch();
   else if(act === 'hdg') toggleHeading();
@@ -1145,6 +1235,9 @@ async function onHold(what){
   else if(what === 'abort') doRematch();
 }
 
+if('serviceWorker' in navigator && location.protocol === 'https:'){
+  window.addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));
+}
 init();
 </script>
 </body>
