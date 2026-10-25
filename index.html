@@ -554,6 +554,7 @@ RENDER.lobby = () => { S.lobbyKey = ''; UPDATE.lobby(); autoArm(); };
 UPDATE.lobby = () => {
   const g = S.game, host = isHost();
   const gc = g.guard_count || 1;
+  if(S.gps.ok && S.me && S.me.gps_ok !== true && !S.gps.reportFailed) reportGps(true);
   S.pickGuards = S.pickGuards.filter(id => S.players.some(p => p.user_id === id)).slice(0, gc);
   const key = JSON.stringify([g.game_mode,g.headstart_sec,g.duration_sec,gc,g.radar_mode,g.scent_sec,g.host_id,g.round,
     S.players.map(p => p.user_id + p.callsign + p.gps_ok), S.pickGuards, S.gps.ok, S.gps.lobbyMsg, S.gps.acc, S.compassOn]);
@@ -644,7 +645,19 @@ function armGPS(quiet){
 }
 function reportGps(ok){
   if(!S.game || !S.me || S.me.gps_ok === ok) return;
-  sb.rpc('set_gps', { p_game:S.game.id, p_ok:ok }).then(() => refresh());
+  if(S.gps.reporting && Date.now() - S.gps.reporting < 5000) return;
+  S.gps.reporting = Date.now();
+  sb.rpc('set_gps', { p_game:S.game.id, p_ok:ok }).then(({ error }) => {
+    S.gps.reporting = 0;
+    if(error){
+      const m = error.message || '';
+      if(/set_gps|function|schema cache/i.test(m)) toast('DATABASE OUT OF DATE — RUN THE LATEST jailbreak_setup.sql','red');
+      else toast('COULD NOT SAVE GPS STATUS: ' + errMsg(error),'red');
+      S.gps.reportFailed = true;
+      return;
+    }
+    refresh();
+  });
 }
 // if this site already has permission, arm silently when entering the lobby
 async function autoArm(){
