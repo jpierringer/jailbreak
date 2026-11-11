@@ -536,8 +536,7 @@ const SETTINGS = [
   ['Guards','guard_count',[[1,'1'],[2,'2'],[3,'3'],[4,'4']]],
   ['Head start','headstart_sec',[[60,'1 MIN'],[120,'2 MIN'],[180,'3 MIN'],[300,'5 MIN']]],
   ['Op length','duration_sec',[[600,'10 MIN'],[900,'15 MIN'],[1200,'20 MIN'],[1800,'30 MIN']]],
-  ['Radar','radar_mode',[['motion','MOTION ONLY'],['full','FULL TRACK']]],
-  ['Scent trail','scent_sec',[[60,'1 MIN'],[120,'2 MIN'],[300,'5 MIN']]]
+  ['Radar','radar_mode',[['motion','MOTION ONLY'],['full','FULL TRACK']]]
 ];
 function settingRow([label, field, opts], host){
   const cur = S.game[field];
@@ -844,7 +843,7 @@ async function pollPositions(){
       let arr = S.trail.get(r.user_id); if(!arr){ arr = []; S.trail.set(r.user_id, arr); }
       arr.push({ lat:r.lat, lng:r.lng, acc:r.acc || 0, t:Date.parse(r.created_at) });
     }
-    const keep = S.game.scent_sec*1000 + 40000, cut = now() - keep;
+    const cut = now() - 90000; // short history, used only to detect movement
     for(const arr of S.trail.values()){ while(arr.length > 1 && arr[0].t < cut) arr.shift(); }
   }catch(e){}
   finally{ S.posPolling = false; }
@@ -1042,21 +1041,6 @@ function drawScope(ts){
       if(s.x > cx + R*0.35){ ctx.textAlign = 'right'; ctx.fillText(txt, s.x - 10, s.y); }
       else { ctx.textAlign = 'left'; ctx.fillText(txt, s.x + 10, s.y); }
     };
-    const n = now(), scent = S.game.scent_sec * 1000;
-
-    // scent trails
-    for(const p of S.players){
-      if(!isTarget(p) || p.status !== 'active') continue;
-      const arr = S.trail.get(p.user_id); if(!arr) continue;
-      for(const pt of arr){
-        const age = n - pt.t; if(age > scent) continue;
-        const s = P(pt); if(s.d > S.range * 1.02) continue;
-        const a = Math.max(0, Math.min(1, 1 - age/scent));
-        ctx.fillStyle = `rgba(${G},${(0.1 + 0.55*a).toFixed(3)})`;
-        ctx.beginPath(); ctx.arc(s.x, s.y, 1.2 + 1.3*a, 0, Math.PI*2); ctx.fill();
-      }
-    }
-
     // friendly hunters
     for(const m of squad()){
       if(!m.last || m.age > 90000) continue;
