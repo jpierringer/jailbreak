@@ -141,6 +141,8 @@ input.f::placeholder{color:#24382b}
 .p-row{display:flex;justify-content:space-between;border-top:1px solid #1d0808;padding:11px 0;font-size:14px;letter-spacing:2px}
 .p-warn{min-height:20px;color:#a25a18;font-size:13px;margin:10px 0 18px;line-height:1.5}
 .pris .btn,.capd .btn{color:#a12a2a;border-color:#3a1010}
+.pris .btn.freeb{color:#d9822b;border-color:#5a3410;font-size:20px;padding:18px 14px}
+.pris .btn:disabled{opacity:.6}
 .p-tips{color:#4a1414;font-size:12px;line-height:1.7;padding-left:16px;margin:22px 0}
 .lock{position:fixed;inset:0;background:#000;z-index:60;display:none;flex-direction:column;align-items:center;justify-content:center;gap:44px}
 .lock.on{display:flex}
@@ -261,6 +263,8 @@ const TXT = {
 TXT.test = { ...TXT.jailbreak, name:'TEST RANGE', roleTag:'TEST', hunter:'OPERATOR', hunters:'OPERATORS', alive:'OPERATORS',
   scatter:'—', confirm:'', note:'Test range: every phone transmits and tracks every other phone. No winner. Walk around and compare.' };
 const T = () => TXT[(S.game && TXT[S.game.game_mode]) ? S.game.game_mode : 'jailbreak'];
+const rescueOn = () => !!(S.game && S.game.game_mode === 'jailbreak' && S.game.rescue_on);
+const safeLeft = p => p && p.safe_until ? Math.max(0, Date.parse(p.safe_until) - now()) : 0;
 const isTest = () => !!(S.game && S.game.game_mode === 'test');
 // who shows up as a tracked contact on my radar
 const isTarget = p => isTest() ? (p.role === 'guard' && p.user_id !== S.user.id) : p.role === 'prisoner';
@@ -409,7 +413,7 @@ function route(){
   const g = S.game, me = S.me;
   if(g.round !== S.round){
     S.round = g.round; S.endCalledAt = 0; S.trail = new Map(); S.lastPosId = 0; S.seen = new Set();
-    S.contacts = []; S.caughtSeen = new Set(); S.caughtInit = false; S.tx = { last:null, lastT:0, sending:false, ok:null, err:'' }; S.prevPhase = null;
+    S.contacts = []; S.caughtSeen = new Set(); S.caughtInit = false; S.nearby = []; S.nearbyKey = ''; S.nearbyAt = 0; S.statusSeen = new Map(); S.tx = { last:null, lastT:0, sending:false, ok:null, err:'' }; S.prevPhase = null;
   }
   let kind;
   if(g.status === 'lobby') kind = 'lobby';
@@ -428,6 +432,7 @@ function route(){
     if(kind === 'results') vib([120,80,120,80,400]);
     RENDER[kind]();
     if(turned){ vib([500,150,500]); toast("YOU'VE BEEN INFECTED — HUNT THE LIVING",'red'); }
+    if(prev === 'captured' && kind === 'prisoner'){ vib([150,80,150,80,600]); toast("YOU'RE FREE — 10 SECONDS TO RUN"); }
   } else if(UPDATE[kind]) UPDATE[kind]();
 }
 
@@ -452,7 +457,8 @@ function tick(){
     if(S.mode === 'guard') toast('HUNT IS LIVE');
   }
   S.prevPhase = ph ? ph.p : null;
-  if(S.mode === 'prisoner' || S.mode === 'guard') maybeSend();
+  if(S.mode === 'prisoner' || S.mode === 'guard' || (S.mode === 'captured' && rescueOn() && S.me && S.me.role === 'prisoner')) maybeSend();
+  if(S.mode === 'prisoner') pollNearby();
   if(S.mode === 'guard') pollPositions();
   if(TICK[S.mode]) TICK[S.mode](ph);
 }
@@ -536,10 +542,12 @@ const SETTINGS = [
   ['Guards','guard_count',[[1,'1'],[2,'2'],[3,'3'],[4,'4']]],
   ['Head start','headstart_sec',[[60,'1 MIN'],[120,'2 MIN'],[180,'3 MIN'],[300,'5 MIN']]],
   ['Op length','duration_sec',[[300,'5 MIN'],[600,'10 MIN'],[900,'15 MIN'],[1200,'20 MIN'],[1800,'30 MIN']]],
-  ['Radar','radar_mode',[['motion','MOTION ONLY'],['full','FULL TRACK']]]
+  ['Radar','radar_mode',[['motion','MOTION ONLY'],['full','FULL TRACK']]],
+  ['Jailbreaks','rescue_on',[[0,'OFF'],[1,'ON']]]
 ];
 function settingRow([label, field, opts], host){
-  const cur = S.game[field];
+  let cur = S.game[field];
+  if(field === 'rescue_on') cur = cur ? 1 : 0;
   if(field === 'guard_count') label = T().startCount;
   if(host){
     return `<div class="setrow"><span>${label}</span><select data-set="${field}">${
@@ -555,7 +563,7 @@ UPDATE.lobby = () => {
   const gc = g.guard_count || 1;
   if(S.gps.ok && S.me && S.me.gps_ok !== true && !S.gps.reportFailed) reportGps(true);
   S.pickGuards = S.pickGuards.filter(id => S.players.some(p => p.user_id === id)).slice(0, gc);
-  const key = JSON.stringify([g.game_mode,g.headstart_sec,g.duration_sec,gc,g.radar_mode,g.scent_sec,g.host_id,g.round,
+  const key = JSON.stringify([g.game_mode,g.rescue_on,g.headstart_sec,g.duration_sec,gc,g.radar_mode,g.scent_sec,g.host_id,g.round,
     S.players.map(p => p.user_id + p.callsign + p.gps_ok), S.pickGuards, S.gps.ok, S.gps.lobbyMsg, S.gps.acc, S.compassOn]);
   if(key === S.lobbyKey) return;
   S.lobbyKey = key;
@@ -583,7 +591,8 @@ UPDATE.lobby = () => {
       </li>`).join('')}</ul>
     ${isTest() ? `<div class="note">Everyone is an operator. No head start, no winner. Each phone sees all the others.</div>` : host ? `<div class="note">${guardNote}${gc > n - 1 && n >= 2 ? ` <span class="amb">Only ${n - 1} ${n - 1 > 1 ? hns : hn} possible with ${n} players.</span>` : ''}</div>` : ''}
   </div>
-  <div class="panel"><div class="lbl">Rules of engagement</div>${SETTINGS.filter(s => !isTest() || !['guard_count','headstart_sec'].includes(s[1])).map(s => settingRow(s, host)).join('')}</div>
+  <div class="panel"><div class="lbl">Rules of engagement</div>${SETTINGS.filter(s => (!isTest() || !['guard_count','headstart_sec'].includes(s[1])) && (s[1] !== 'rescue_on' || (g.game_mode || 'jailbreak') === 'jailbreak')).map(s => settingRow(s, host)).join('')}
+    ${(g.game_mode || 'jailbreak') === 'jailbreak' && g.rescue_on ? `<div class="note">Freeze tag: a free prisoner who gets within ~8 m (24 ft) of a captured one sees their name, holds it for 10 seconds, and breaks them out. Both get 10 seconds of protection.</div>` : ''}</div>
   <div class="panel"><div class="lbl">Systems check</div>
     <div class="row2">
       <button class="btn sm ${S.gps.ok ? 'ok' : S.gps.denied ? 'bad' : ''}" data-act="armgps">${
@@ -609,7 +618,7 @@ async function changeSetting(field, raw){
   const { error } = await sb.rpc('update_settings', {
     p_game:g.id, p_headstart:next.headstart_sec, p_duration:next.duration_sec,
     p_radius:next.catch_radius_m, p_mode:next.radar_mode, p_scent:next.scent_sec,
-    p_guards:next.guard_count || 1, p_game_mode:next.game_mode || 'jailbreak'
+    p_guards:next.guard_count || 1, p_game_mode:next.game_mode || 'jailbreak', p_rescue:!!next.rescue_on
   });
   if(error) toast(errMsg(error),'red');
   refresh();
@@ -722,10 +731,12 @@ RENDER.prisoner = () => {
     <div class="p-row"><span id="pTx">○ STANDBY</span><span id="pAcc">GPS —</span></div>
     <div class="p-row"><span>${T().alive}</span><span id="pLeft">-</span></div>
     <div class="p-warn" id="pWarn"></div>
-    <button class="btn hold" data-hold="surrender" data-ms="2000">${T().tagged}</button>
+    ${rescueOn() ? `<div id="pFree"></div>` : ''}
+    <button class="btn hold" id="tagBtn" data-hold="surrender" data-ms="2000">${T().tagged}</button>
     <ul class="p-tips">
       <li>Turn your brightness all the way down.</li>
       <li>${T().tagTip}</li>
+      ${rescueOn() ? `<li>Get within about 8 m (24 ft) of a captured prisoner and their name appears above. Hold it for 10 seconds to break them out. You both get 10 seconds of protection.</li>` : ''}
       <li>Keep this screen open. If your signal drops, the guard sees your last position.</li>
       <li>The screen blacks out after a few seconds. Hold the circle to bring it back.</li>
     </ul>
@@ -754,6 +765,47 @@ async function maybeSend(){
   if(error){ t.ok = false; t.err = errMsg(error); t.lastT = Date.now() - 7000; }
   else { t.ok = true; t.err = ''; t.last = { lat:f.lat, lng:f.lng }; t.lastT = Date.now(); t.count = (t.count || 0) + 1; }
 }
+async function pollNearby(){
+  if(!rescueOn() || S.nearbyBusy || Date.now() - (S.nearbyAt || 0) < 3000) return;
+  const f = S.gps.fix, ph = phase(); if(!f || !ph || ph.p === 'over') return;
+  S.nearbyBusy = true; S.nearbyAt = Date.now();
+  try{
+    const { data, error } = await sb.rpc('nearby_captured', { p_game:S.game.id, p_lat:f.lat, p_lng:f.lng });
+    if(!error){
+      const before = (S.nearby || []).length;
+      S.nearby = data || [];
+      if(S.nearby.length && !before){ vib([80,60,80]); if(S.locked) setLock(false); }
+      renderNearby();
+    }
+  }finally{ S.nearbyBusy = false; }
+}
+function renderNearby(){
+  const el = $('pFree'); if(!el) return;
+  if(hold && hold.el.dataset.hold === 'free') return; // don't disturb a rescue in progress
+  const key = (S.nearby || []).map(n => n.user_id).join(',');
+  if(key === S.nearbyKey) return;
+  S.nearbyKey = key;
+  el.innerHTML = (S.nearby || []).length ? `<div class="lbl" style="color:#a25a18;margin-top:4px">CAPTURED NEARBY · HOLD 10S TO FREE</div>` +
+    S.nearby.map(n => `<button class="btn hold freeb" data-hold="free" data-v="${esc(n.user_id)}" data-ms="10000">FREE ${esc(n.callsign)}</button>`).join('') : '';
+}
+async function beginFree(target){
+  const f = S.gps.fix;
+  if(!f){ toast('NO GPS FIX','amb'); return false; }
+  const { error } = await sb.rpc('begin_free', { p_game:S.game.id, p_target:target, p_lat:f.lat, p_lng:f.lng });
+  if(error){ toast(errMsg(error),'red'); return false; }
+  return true;
+}
+function cancelFree(){ sb.rpc('cancel_free', { p_game:S.game.id }).then(() => {}); }
+async function completeFree(){
+  const f = S.gps.fix;
+  if(!f){ toast('NO GPS FIX','amb'); cancelFree(); return; }
+  const { data, error } = await sb.rpc('complete_free', { p_game:S.game.id, p_lat:f.lat, p_lng:f.lng });
+  S.nearbyKey = ''; S.nearbyAt = 0;
+  if(error){ toast(errMsg(error),'red'); cancelFree(); return; }
+  vib([150,80,150,80,600]);
+  toast(`${data && data.freed ? data.freed + ' IS FREE' : 'FREED'} — RUN! 10S PROTECTION`);
+  refresh();
+}
 const atLarge = () => {
   const alive = S.players.filter(p => p.role === 'prisoner' && p.status === 'active').length;
   const total = S.players.filter(p => p.role === 'prisoner' || p.caught_by === 'infected').length;
@@ -776,7 +828,12 @@ TICK.prisoner = ph => {
   else if(!f) warn = 'WAITING FOR GPS — allow location access';
   else if(f.acc > 50) warn = 'WEAK GPS — move toward open sky';
   else if(!('wakeLock' in navigator)) warn = 'Keep the screen on manually';
+  const safe = safeLeft(S.me);
+  if(safe > 0) warn = `PROTECTED ${Math.ceil(safe/1000)}S — RUN!`;
   set('pWarn', warn);
+  const tb = $('tagBtn');
+  if(tb){ tb.disabled = safe > 0; set('tagBtn', safe > 0 ? `PROTECTED · ${Math.ceil(safe/1000)}S` : T().tagged); }
+  if(S.nearby && S.nearby.length) S.lastActivity = Date.now();
   if(!S.locked && Date.now() - S.lastActivity > 12000) setLock(true);
 };
 
@@ -787,17 +844,33 @@ RENDER.captured = () => {
   <div class="capd">
     <div class="lbl">STATUS</div>
     <div class="big">${spect ? 'STAND BY' : T().outBig}</div>
-    <p>${spect ? 'You\'re sitting this round out.' : T().outMsg}</p>
+    <p>${spect ? 'You\'re sitting this round out.' : rescueOn() ? 'You\'re in the yard — but not out of the game.' : T().outMsg}</p>
     <div class="p-row"><span id="cPhase">—</span><span id="cClock">--:--</span></div>
     <div class="p-row"><span>${T().alive}</span><span id="cLeft">-</span></div>
+    ${!spect && rescueOn() ? `
+    <div class="p-row"><span id="cTx">○ STANDBY</span><span id="cAcc">GPS —</span></div>
+    <div class="p-warn" id="cFree" style="font-size:15px"></div>
+    <p style="margin-top:6px">Stay where you were tagged. A free prisoner within ~8 m (24 ft) can break you out by holding your name for 10 seconds. Keep this screen open so they can find you.</p>` : ''}
     ${hostAbort()}
   </div>`;
+  if(!spect && rescueOn()){ startGPS(() => maybeSend()); keepAwake(true); }
   TICK.captured(phase());
 };
 TICK.captured = ph => {
   if(!ph) return;
   set('cPhase', ph.p === 'head' ? 'HEAD START' : 'HUNT');
   set('cClock', fmt(ph.left)); set('cLeft', atLarge());
+  if(!$('cFree')) return;
+  const f = S.gps.fix, t = S.tx;
+  set('cAcc', f ? `GPS ±${Math.round(f.acc)}M` : 'GPS ACQUIRING');
+  set('cTx', t.ok === false ? '✕ TX FAILED' : t.ok ? `● TX ${Math.round((Date.now() - t.lastT)/1000)}S AGO` : '○ NO TX YET');
+  const res = S.players.find(p => p.freeing_target === S.user.id && p.status === 'active' && p.freeing_started
+    && now() - Date.parse(p.freeing_started) < 15000);
+  if(res){
+    const left = Math.max(0, 10 - Math.floor((now() - Date.parse(res.freeing_started))/1000));
+    set('cFree', `${res.callsign} IS BREAKING YOU OUT… ${left}S`);
+    if(!S.rescueBuzz){ S.rescueBuzz = true; vib([80,60,80]); }
+  } else { set('cFree', t.ok === false ? 'SIGNAL NOT SENDING — TEAMMATES CAN\'T FIND YOU' : ''); S.rescueBuzz = false; }
 };
 
 /* ---------- guard ---------- */
@@ -875,10 +948,16 @@ function analyze(){
   }
   S.contacts = out;
   for(const p of S.players){
-    if(p.caught_at && !S.caughtSeen.has(p.user_id)){
+    const ck = p.user_id + '|' + p.caught_at;
+    if(p.caught_at && !S.caughtSeen.has(ck)){
       if(S.caughtInit) { vib([100,60,300]); toast(T().confirm + p.callsign); }
-      S.caughtSeen.add(p.user_id);
+      S.caughtSeen.add(ck);
     }
+    const was = S.statusSeen.get(p.user_id);
+    if(S.caughtInit && was === 'caught' && p.status === 'active' && p.role === 'prisoner'){
+      vib([300,100,300]); toast('BREAKOUT: ' + p.callsign + ' IS FREE', 'amb');
+    }
+    S.statusSeen.set(p.user_id, p.status);
   }
   S.caughtInit = true;
   for(const c of out){
@@ -943,12 +1022,18 @@ function renderContacts(){
     (a.status !== 'active') - (b.status !== 'active') || (order[a.state] ?? 4) - (order[b.state] ?? 4));
   const rows = list.map(c => {
     let st, cls;
-    if(c.status !== 'active'){ st = 'CAPTURED ' + (c.caught_at ? fmtUp(Date.parse(c.caught_at) - hunt) : ''); cls = 'dim strike'; }
+    if(c.status !== 'active'){
+      const res = rescueOn() && S.players.find(p => p.freeing_target === c.id && p.status === 'active' && p.freeing_started && now() - Date.parse(p.freeing_started) < 15000);
+      if(res){ st = 'BREAKOUT IN PROGRESS'; cls = 'lost'; }
+      else { st = 'CAPTURED ' + (c.caught_at ? fmtUp(Date.parse(c.caught_at) - hunt) : ''); cls = 'dim strike'; }
+    }
     else if(ph && ph.p === 'head'){ st = T().scatter; cls = 'dim'; }
     else if(c.state === 'live'){ st = c.dist != null ? `${fmtDist(c.dist)} · ${pad3(c.brg)}°${c.moving ? ' · MOVING' : ''}` : 'LIVE'; cls = 'live'; }
     else if(c.state === 'lost'){ st = 'SIG LOST' + (c.dist != null ? ` · ${fmtDist(c.dist)} · ${pad3(c.brg)}°` : ''); cls = 'lost'; }
     else if(c.state === 'nodata'){ st = 'NO SIGNAL'; cls = 'dim'; }
     else { st = 'NO CONTACT'; cls = 'dim'; }
+    const sp = S.players.find(p => p.user_id === c.id), sl = c.status === 'active' ? safeLeft(sp) : 0;
+    if(sl > 0) st += ` · SAFE ${Math.ceil(sl/1000)}S`;
     return `<div class="ct ${cls}"><span>${esc(c.callsign)}</span><span>${st}</span></div>`;
   }).join('');
   el.innerHTML = rows || `<div class="ct dim"><span>NO ${T().preys} LEFT</span></div>`;
@@ -1157,7 +1242,8 @@ RENDER.results = () => {
     <div class="lbl">${multi ? 'Guards' : 'Guard'}</div>
     ${guards.map(gd => row(gw ? 'live' : 'dim', gd.callsign, gw ? 'VICTORY' : 'OUTRUN', gw ? 'style="color:var(--amb)"' : '')).join('')}
     <div class="lbl" style="margin-top:16px">Prisoners</div>
-    ${pris.map(p => row(p.status === 'active' ? 'live' : 'dim', p.callsign, p.status === 'active' ? 'ESCAPED' : 'CAPTURED ' + t(p))).join('')}
+    ${pris.map(p => row(p.status === 'active' ? 'live' : 'dim', p.callsign,
+      (p.status === 'active' ? 'ESCAPED' : 'CAPTURED ' + t(p)) + (p.rescues ? ` · FREED ${p.rescues}` : ''))).join('')}
   </div>${tail}`;
 };
 
@@ -1205,25 +1291,33 @@ document.addEventListener('keydown', e => {
 let hold = null;
 document.addEventListener('pointerdown', e => {
   S.lastActivity = Date.now();
-  const el = e.target.closest('[data-hold]'); if(!el) return;
+  const el = e.target.closest('[data-hold]'); if(!el || el.disabled) return;
   e.preventDefault();
   const ms = +el.dataset.ms || 1500, t0 = performance.now();
   hold = { el };
+  if(el.dataset.hold === 'free'){
+    beginFree(el.dataset.v).then(ok => { if(!ok && hold && hold.el === el){ el.style.setProperty('--p', 0); hold = null; } });
+  }
   const step = () => {
     if(!hold || hold.el !== el) return;
     const p = Math.min(1, (performance.now() - t0) / ms);
     el.style.setProperty('--p', p);
-    if(p >= 1){ hold = null; el.style.setProperty('--p', 0); vib(40); onHold(el.dataset.hold); return; }
+    if(p >= 1){ hold = null; el.style.setProperty('--p', 0); vib(40); onHold(el.dataset.hold, el); return; }
     requestAnimationFrame(step);
   };
   requestAnimationFrame(step);
 }, { passive:false });
-const cancelHold = () => { if(hold){ hold.el.style.setProperty('--p', 0); hold = null; } };
+const cancelHold = () => {
+  if(!hold) return;
+  const el = hold.el; el.style.setProperty('--p', 0); hold = null;
+  if(el.dataset.hold === 'free'){ cancelFree(); toast('KEEP HOLDING FOR 10 SECONDS','amb'); }
+};
 document.addEventListener('pointerup', cancelHold);
 document.addEventListener('pointercancel', cancelHold);
 document.addEventListener('contextmenu', e => { if(e.target.closest('[data-hold]')) e.preventDefault(); });
 
-async function onHold(what){
+async function onHold(what, el){
+  if(what === 'free'){ completeFree(); return; }
   if(what === 'unlock'){ S.lastActivity = Date.now(); setLock(false); }
   else if(what === 'surrender'){
     const { error } = await sb.rpc('surrender', { p_game:S.game.id });
