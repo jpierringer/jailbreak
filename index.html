@@ -119,6 +119,8 @@ input.f::placeholder{color:#24382b}
 .btn:disabled{opacity:.35}
 .hold{position:relative;overflow:hidden;isolation:isolate}
 .hold::before{content:"";position:absolute;left:0;top:0;bottom:0;width:calc(var(--p,0) * 100%);background:currentColor;opacity:.22;z-index:-1}
+.err ul{margin:6px 0 0;padding-left:18px}.err li{margin:2px 0}.err b{color:#ff8a8a}
+.err:empty{display:none}
 .err{color:var(--red);font-size:13px;letter-spacing:1px;margin:-4px 0 14px;line-height:1.5}
 .wait{text-align:center;color:var(--amb);letter-spacing:3px;font-size:14px;padding:16px 0 18px;animation:blink 1.6s infinite}
 @keyframes blink{50%{opacity:.4}}
@@ -389,19 +391,37 @@ function onOrient(e){
   if(S.heading == null) S.heading = h;
   else { const d = ((h - S.heading + 540) % 360) - 180; S.heading = (S.heading + d*0.2 + 360) % 360; }
 }
-async function ensureCompass(){
+async function ensureCompass(quiet){
   try{
-    if(typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function'){
+    if(typeof DeviceOrientationEvent === 'undefined'){ S.compassDenied = 'none'; if(!quiet) toast('NO COMPASS ON THIS DEVICE','red'); updateSys(); return false; }
+    if(typeof DeviceOrientationEvent.requestPermission === 'function'){
       const r = await DeviceOrientationEvent.requestPermission();
-      if(r !== 'granted'){ toast('COMPASS DENIED','amb'); return false; }
+      if(r !== 'granted'){ S.compassDenied = 'denied'; if(!quiet) showCompassHelp(); updateSys(); return false; }
     }
-  }catch(e){ toast('COMPASS UNAVAILABLE','amb'); return false; }
+  }catch(e){ S.compassDenied = 'denied'; if(!quiet) showCompassHelp(); updateSys(); return false; }
+  S.compassDenied = false;
   if(!S.compassOn){
     window.addEventListener('deviceorientationabsolute', onOrient, true);
     window.addEventListener('deviceorientation', onOrient, true);
     S.compassOn = true;
+    // armed but the phone never reports a heading (no magnetometer)
+    setTimeout(() => { if(S.heading == null){ S.compassNoData = true; updateSys(); } }, 3000);
   }
+  updateSys();
   return true;
+}
+const needsCompassTap = () => typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function';
+function showCompassHelp(){
+  const el = $('gpsHelp'); if(!el) return;
+  el.innerHTML = `<h3>COMPASS BLOCKED</h3>
+    <div>This phone said no to motion &amp; orientation access, which the radar needs to know which way you're facing. To fix it:</div>
+    <ol><li>Tap <b>Reload</b> below, then tap <b>ARM COMPASS</b> again and choose <b>Allow</b>.</li>
+      <li>If it doesn't ask: close this tab (or swipe the app away), reopen the game, and try again.</li>
+      <li>If your iPhone has a <b>Motion &amp; Orientation Access</b> switch under <b>Settings → Apps → Safari</b>, make sure it's on.</li>
+      <li>On Android: tap the icon left of the address bar → <b>Permissions</b> (or Site settings) → <b>Motion sensors</b> → <b>Allow</b>.</li></ol>
+    <button class="btn solid" data-act="reload">RELOAD</button>
+    <button class="btn sm ghost" data-act="hidegps">HIDE</button>`;
+  el.classList.add('on');
 }
 let wakeLock = null, wantWake = false;
 async function keepAwake(on){
@@ -571,9 +591,14 @@ function renderHome(msg='', code=''){
   teardown(); S.mode = 'home'; S.modeKey = null;
   const cs = LS.get('jb_callsign') || '';
   $app.innerHTML = `
-  <div class="brand"><div class="logo">NIGHT<span>HUNT</span></div><div class="tag">JAIL BREAK · APOCALYPSE</div></div>
+  <div class="brand"><div class="logo">NIGHT<span>HUNT</span></div><div class="tag">JAIL BREAK · APOCALYPSE · DEATHMATCH</div></div>
   <div class="panel"><div class="lbl">Your callsign</div>
     <input class="f" id="cs" maxlength="12" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="VIPER" value="${esc(cs)}"></div>
+  <div class="panel"><div class="lbl">Systems check · required</div>
+    <div id="sysBox">${sysButtons()}</div>
+    <div class="note">Every player needs GPS (where you are) and the compass (which way you're facing). Allow both when your phone asks.</div>
+  </div>
+  <div class="err" id="homeErr"></div>
   <div class="panel"><div class="lbl">Join an op</div>
     <div class="row"><input class="f" id="code" maxlength="5" placeholder="CODE" autocomplete="off" autocapitalize="characters" spellcheck="false" value="${esc(code)}">
     <button class="btn" style="width:auto" data-act="join">JOIN</button></div></div>
@@ -581,7 +606,7 @@ function renderHome(msg='', code=''){
   ${msg ? `<div class="err">${esc(msg)}</div>` : ''}
   ${installHint()}
   <div class="panel brief"><div class="lbl">Jail Break</div>
-    <p><b class="amb">GUARDS</b> hunt <b>ESCAPED PRISONERS</b>. Prisoners' phones leave a fading trail only the guards' radar can see.</p>
+    <p><b class="amb">GUARDS</b> hunt <b>ESCAPED PRISONERS</b>. Prisoners' phones show up on the guards' radar, and only the guards'.</p>
     <p>Guards tag by hand; the prisoner confirms. Prisoners win if anyone is still loose when time runs out.</p>
   </div>
   <div class="panel brief"><div class="lbl">Apocalypse</div>
@@ -594,6 +619,7 @@ function renderHome(msg='', code=''){
   <div class="panel brief"><div class="lbl">Test range</div>
     <p>No game. Everyone transmits and tracks everyone, with live GPS diagnostics. Use it to check accuracy and radar behavior.</p>
   </div>`;
+  autoArm();
 }
 
 let deferredInstall = null;
@@ -610,7 +636,15 @@ function installHint(){
 }
 function getCallsign(){
   const el = $('cs'); const v = (el ? el.value : '').trim().toUpperCase().replace(/\s+/g,' ');
-  if(!v){ toast('ENTER A CALLSIGN','amb'); el && el.focus(); return null; }
+  // callsign, GPS and compass are all required
+  const m = missingSetup(true), err = $('homeErr');
+  if(m.length){
+    if(err){ err.dataset.shown = '1'; err.innerHTML = `<b>BEFORE YOU JOIN OR CREATE:</b><ul>${m.map(x => `<li>${x}</li>`).join('')}</ul>`;
+      err.scrollIntoView({ behavior:'smooth', block:'center' }); }
+    cue('bad');
+    return null;
+  }
+  if(err){ err.innerHTML = ''; delete err.dataset.shown; }
   LS.set('jb_callsign', v); return v;
 }
 async function doCreate(){
@@ -661,7 +695,7 @@ UPDATE.lobby = () => {
   S.pickGuards = S.pickGuards.filter(id => S.players.some(p => p.user_id === id)).slice(0, gc);
   const key = JSON.stringify([g.game_mode,g.rescue_on,g.class_limit,g.red_lat,g.blue_lat,
     S.players.map(p => (p.team || '-') + (p.cls || '')),g.headstart_sec,g.duration_sec,gc,g.radar_mode,g.scent_sec,g.host_id,g.round,
-    S.players.map(p => p.user_id + p.callsign + p.gps_ok), S.pickGuards, S.gps.ok, S.gps.lobbyMsg, S.gps.acc, S.compassOn]);
+    S.players.map(p => p.user_id + p.callsign + p.gps_ok), S.pickGuards, S.gps.ok, S.gps.lobbyMsg, S.gps.acc, S.compassOn, S.compassDenied, S.compassNoData, S.gps.denied, soundOn]);
   if(key === S.lobbyKey) return;
   S.lobbyKey = key;
   const n = S.players.length;
@@ -692,18 +726,10 @@ UPDATE.lobby = () => {
   <div class="panel"><div class="lbl">Rules of engagement</div>${SETTINGS.filter(s => (!isTest() || !['guard_count','headstart_sec'].includes(s[1])) && (s[1] !== 'rescue_on' || (g.game_mode || 'jailbreak') === 'jailbreak')
       && (isTdm() ? !['guard_count','radar_mode'].includes(s[1]) : s[1] !== 'class_limit')).map(s => settingRow(s, host)).join('')}
     ${(g.game_mode || 'jailbreak') === 'jailbreak' && g.rescue_on ? `<div class="note">Freeze tag: a free prisoner who gets within ~8 m (24 ft) of a captured one sees their name, holds it for 10 seconds, and breaks them out. Both get 10 seconds of protection.</div>` : ''}</div>
-  <div class="panel"><div class="lbl">Systems check</div>
-    <div class="row2">
-      <button class="btn sm ${S.gps.ok ? 'ok' : S.gps.denied ? 'bad' : ''}" data-act="armgps">${
-        S.gps.ok ? `GPS ✓${S.gps.acc ? ' ±' + Math.round(S.gps.acc) + 'M' : ''}` : S.gps.denied ? 'GPS BLOCKED' : S.gps.lobbyMsg || 'ARM GPS'}</button>
-      <button class="btn sm ${S.compassOn ? 'ok' : ''}" data-act="armcompass">${S.compassOn ? 'COMPASS ✓' : 'ARM COMPASS'}</button>
-    </div>
-    <button class="btn sm ${soundOn ? 'ok' : ''}" style="margin:10px 0 0" data-act="sound">${soundOn ? 'SOUND ON · TAP TO MUTE' : 'SOUND OFF · TAP TO TURN ON'}</button>
-    <div class="note">Sound cues play for hits, warnings and alerts (iPhones can't vibrate from a web app). An earbud keeps you from giving away your position.</div>
-    ${S.gps.ok && S.gps.acc > 500 ? `<div class="note" style="color:var(--amb)">Accuracy is ±${Math.round(S.gps.acc)} m — Precise Location is probably off for this browser. Turn it on in the phone's Location settings.</div>` : ''}
-    ${S.gps.denied ? `<div class="note" style="color:var(--red)">Location is blocked on this phone. Tap GPS BLOCKED for how to fix it.</div>` : ''}
-    <div class="note">Everyone arm GPS now — the roster shows who still needs to. Compass helps if you end up hunting.${'wakeLock' in navigator ? ' The app keeps your screen awake during the op.' : ' <span class="amb">This browser can\'t keep the screen awake — set Auto-Lock to Never before the op.</span>'}</div>
-  </div>
+  ${S.gps.ok && S.compassOn ? `<div class="panel"><div class="lbl">Systems</div><div id="sysBox">${sysButtons()}</div>
+      <div class="note">${'wakeLock' in navigator ? 'The app keeps your screen awake during the op.' : '<span class="amb">This browser can\'t keep the screen awake — set Auto-Lock to Never before the op.</span>'} An earbud keeps sound cues from giving away your position.</div></div>`
+    : `<div class="panel" style="border-color:var(--red)"><div class="lbl" style="color:var(--red)">Re-arm required</div><div id="sysBox">${sysButtons()}</div>
+      <div class="note" style="color:var(--amb)">The page reloaded, so your phone needs GPS and compass armed again before the op starts.</div></div>`}
   ${(() => { const missing = S.players.filter(p => !p.gps_ok).map(p => esc(p.callsign));
       return host && missing.length ? `<div class="note" style="color:var(--amb);margin:-4px 0 12px">No GPS yet: ${missing.join(', ')}. They need to tap ARM GPS (and allow location) before you start.</div>` : ''; })()}
   ${host
@@ -742,24 +768,59 @@ function doShare(){
 function armGPS(quiet){
   if(!('geolocation' in navigator)){ toast('NO GPS ON THIS DEVICE','red'); return; }
   if(S.gps.arming) return;
-  S.gps.arming = true; S.gps.lobbyMsg = 'ACQUIRING…'; if(S.mode === 'lobby') UPDATE.lobby();
+  S.gps.arming = true; S.gps.lobbyMsg = 'ACQUIRING…'; updateSys();
   navigator.geolocation.getCurrentPosition(p => {
     S.gps.arming = false; S.gps.ok = true; S.gps.denied = false; showGpsHelp(false);
     S.gps.acc = p.coords.accuracy; S.gps.lobbyMsg = '';
     if(!quiet) toast(`GPS LOCKED ±${Math.round(p.coords.accuracy)} M`);
     reportGps(true);
-    if(S.mode === 'lobby') UPDATE.lobby();
+    updateSys();
   }, err => {
     S.gps.arming = false;
     if(err.code === 1){ S.gps.denied = true; S.gps.lobbyMsg = 'BLOCKED'; showGpsHelp(true); reportGps(false); }
     else { S.gps.lobbyMsg = 'NO FIX — TAP TO RETRY'; if(!quiet) toast('NO GPS FIX YET — STEP OUTSIDE AND RETRY','amb'); }
-    if(S.mode === 'lobby') UPDATE.lobby();
+    updateSys();
   }, { enableHighAccuracy:true, timeout:15000, maximumAge:0 });
+}
+// what still stands between this phone and joining an op
+function missingSetup(needCallsign){
+  const out = [];
+  if(needCallsign){
+    const el = $('cs'); if(!el || !el.value.trim()) out.push('Enter a <b>callsign</b>.');
+  }
+  if(!S.gps.ok) out.push(S.gps.denied ? 'Location is <b>blocked</b> — tap GPS BLOCKED to see how to fix it.'
+    : S.gps.arming ? 'Wait for the <b>GPS fix</b> (step outside if it\'s slow).' : 'Tap <b>ARM GPS</b> and allow location.');
+  if(!S.compassOn) out.push(S.compassDenied === 'none' ? 'This device has <b>no compass</b> — use a phone.'
+    : S.compassDenied ? 'Motion access is <b>blocked</b> — tap COMPASS BLOCKED to see how to fix it.' : 'Tap <b>ARM COMPASS</b> and allow motion access.');
+  return out;
+}
+function sysButtons(){
+  const gps = S.gps.ok ? `GPS ✓${S.gps.acc ? ' ±' + Math.round(S.gps.acc) + 'M' : ''}` : S.gps.denied ? 'GPS BLOCKED' : S.gps.arming ? 'ACQUIRING…' : S.gps.lobbyMsg || 'ARM GPS';
+  const cmp = S.compassOn ? (S.compassNoData ? 'COMPASS ✓ (NO DATA)' : 'COMPASS ✓') : S.compassDenied === 'none' ? 'NO COMPASS' : S.compassDenied ? 'COMPASS BLOCKED' : 'ARM COMPASS';
+  return `<div class="row2">
+      <button class="btn sm ${S.gps.ok ? 'ok' : S.gps.denied ? 'bad' : ''}" id="sysGps" data-act="armgps">${gps}</button>
+      <button class="btn sm ${S.compassOn ? 'ok' : S.compassDenied ? 'bad' : ''}" id="sysCmp" data-act="armcompass">${cmp}</button>
+    </div>
+    <button class="btn sm ${soundOn ? 'ok' : ''}" id="sysSnd" style="margin:10px 0 0" data-act="sound">${soundOn ? 'SOUND ON · TAP TO MUTE' : 'SOUND OFF · TAP TO TURN ON'}</button>
+    ${S.gps.ok && S.gps.acc > 500 ? `<div class="note" style="color:var(--amb)">Accuracy is ±${Math.round(S.gps.acc)} m — Precise Location is probably off for this browser. Turn it on in the phone's Location settings.</div>` : ''}
+    ${S.compassOn && S.compassNoData ? `<div class="note" style="color:var(--amb)">No compass readings yet. Wave the phone in a figure-8; if it stays blank, direction features won't work on this phone.</div>` : ''}`;
+}
+// refresh the systems panel wherever it is showing
+function updateSys(){
+  const box = $('sysBox'); if(box) box.innerHTML = sysButtons();
+  const err = $('homeErr');
+  if(err && err.dataset.shown){
+    const m = missingSetup(true);
+    err.innerHTML = m.length ? `<b>BEFORE YOU JOIN OR CREATE:</b><ul>${m.map(x => `<li>${x}</li>`).join('')}</ul>` : '';
+    if(!m.length) delete err.dataset.shown;
+  }
+  if(S.mode === 'lobby'){ S.lobbyKey = ''; UPDATE.lobby(); }
 }
 function reportGps(ok){
   if(!S.game || !S.me || S.me.gps_ok === ok) return;
-  if(S.gps.reporting && Date.now() - S.gps.reporting < 5000) return;
-  S.gps.reporting = Date.now();
+  // at most one report every 5 s, even if the roster hasn't caught up yet
+  if(S.gps.reportAt && Date.now() - S.gps.reportAt < 5000) return;
+  S.gps.reportAt = Date.now();
   sb.rpc('set_gps', { p_game:S.game.id, p_ok:ok }).then(({ error }) => {
     S.gps.reporting = 0;
     if(error){
@@ -778,8 +839,10 @@ async function autoArm(){
     if(S.gps.ok || !navigator.permissions) return;
     const st = await navigator.permissions.query({ name:'geolocation' });
     if(st.state === 'granted') armGPS(true);
-    else if(st.state === 'denied'){ S.gps.denied = true; S.gps.lobbyMsg = 'BLOCKED'; if(S.mode === 'lobby') UPDATE.lobby(); }
+    else if(st.state === 'denied'){ S.gps.denied = true; S.gps.lobbyMsg = 'BLOCKED'; updateSys(); }
   }catch(e){}
+  // Android has no compass prompt, so arm it silently
+  if(!S.compassOn && !needsCompassTap()) ensureCompass(true);
 }
 const isStandalone = () => window.navigator.standalone === true || (window.matchMedia && matchMedia('(display-mode: standalone)').matches);
 function gpsHelpSteps(){
@@ -1936,7 +1999,7 @@ document.addEventListener('click', e => {
     UPDATE.lobby();
   }
   else if(act === 'start') doStart();
-  else if(act === 'sound'){ setSound(!soundOn); S.lobbyKey = ''; UPDATE.lobby(); }
+  else if(act === 'sound'){ setSound(!soundOn); updateSys(); }
   else if(act === 'team') tdmRpc('set_team', { p_team:el.dataset.v }).then(ok => ok && refresh());
   else if(act === 'cls') tdmRpc('set_class', { p_cls:el.dataset.v }).then(ok => {
     if(!ok) return;
@@ -1959,7 +2022,11 @@ document.addEventListener('click', e => {
   else if(act === 'install' && deferredInstall){ deferredInstall.prompt(); deferredInstall.userChoice.finally(() => { deferredInstall = null; if(S.mode === 'home') renderHome(); }); }
   else if(act === 'noinstall'){ LS.set('jb_hide_install', '1'); const el = e.target.closest('.install'); if(el) el.remove(); }
   else if(act === 'hidegps') showGpsHelp(false);
-  else if(act === 'armcompass') ensureCompass().then(ok => { if(ok){ toast('COMPASS ARMED'); if(S.mode === 'lobby') UPDATE.lobby(); el.remove && S.mode === 'soldier' && el.remove(); } });
+  else if(act === 'armcompass'){
+    if(S.compassOn) toast(S.compassNoData ? 'ARMED, BUT NO READINGS YET' : 'COMPASS ALREADY ARMED');
+    else if(S.compassDenied === 'denied') showCompassHelp();
+    else ensureCompass().then(ok => { if(ok){ toast('COMPASS ARMED'); if(S.mode === 'soldier' && el.parentNode && !el.closest('#sysBox')) el.remove(); } });
+  }
   else if(act === 'rematch') doRematch();
   else if(act === 'hdg') toggleHeading();
   else if(act === 'range'){
@@ -1971,6 +2038,7 @@ document.addEventListener('change', e => {
   const el = e.target.closest('[data-set]'); if(el) changeSetting(el.dataset.set, el.value);
 });
 document.addEventListener('input', e => {
+  if(e.target.id === 'cs') updateSys();
   if(e.target.id === 'code') e.target.value = e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '');
 });
 document.addEventListener('keydown', e => {
