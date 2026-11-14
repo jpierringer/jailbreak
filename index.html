@@ -33,11 +33,43 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;z-index:50;
   background:repeating-linear-gradient(0deg,rgba(0,0,0,.22) 0 1px,transparent 1px 3px)}
 body.dark{background:#000}
 body.apoc{--amb:#ff4a3d}
-.modepick{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:14px}
+.modepick{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:14px}
 .modepick button{background:transparent;border:1px solid var(--line);color:var(--mute);font-family:var(--sten);font-size:16px;letter-spacing:1px;padding:14px 4px;border-radius:0}
 .modepick button.on{color:#021007;background:var(--grn);border-color:var(--grn)}
 .modepick button.on.ap{background:#ff4a3d;border-color:#ff4a3d}
 .modepick button.on.ts{background:#ffb020;border-color:#ffb020}
+.modepick button.on.dm{background:#4aa8ff;border-color:#4aa8ff}
+/* deathmatch */
+body.tdm{--tm:#4aa8ff}
+.btn.tbtn{margin:0;color:var(--tc);border-color:var(--tc)}
+.btn.tbtn.on{background:var(--tc);color:#020406}
+.clsgrid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.clsb{background:transparent;border:1px solid var(--line);color:var(--mute);font-family:var(--head);font-weight:700;letter-spacing:2px;font-size:15px;padding:10px 8px;text-align:left;display:flex;justify-content:space-between;align-items:center;border-radius:0}
+.clsb b{font-weight:700}
+.clsb .hrt{color:#ff5a6a;font-size:12px;letter-spacing:0}
+.clsb.on{border-color:var(--grn);color:var(--grn);background:rgba(61,255,139,.08)}
+.hearts{text-align:center;font-size:30px;letter-spacing:4px;color:#ff4d5e;margin:2px 0 2px;min-height:38px;text-shadow:0 0 10px rgba(255,77,94,.4)}
+.hearts .hx{color:#2a1418;text-shadow:none}
+.tstat{text-align:center;font-size:12px;letter-spacing:2px;min-height:18px;margin-bottom:2px}
+.btn.fire{font-size:24px;padding:18px;letter-spacing:5px;background:transparent;color:var(--mute);border-color:var(--line)}
+.btn.fire:disabled{opacity:.5}
+.btn.fire.lit{background:#ff3b3b;border-color:#ff3b3b;color:#fff;box-shadow:0 0 18px rgba(255,59,59,.45)}
+.chg{position:relative;height:14px;border:1px solid var(--line);margin-bottom:6px}
+.chg i{position:absolute;top:0;bottom:0;width:1px;background:var(--mute)}
+.chgbar{height:100%;width:0;background:linear-gradient(90deg,#1e7a47,#ffb020,#ff3b3b)}
+.susbar{border:1px solid #6a4a10;color:var(--amb);font-size:12px;line-height:1.5;padding:8px 10px;margin-bottom:10px}
+.susbar .btn{margin:8px 0 0}
+.fe{font-size:13px;letter-spacing:1px;padding:5px 0;border-top:1px solid var(--line)}
+.fe:first-child{border-top:0}
+.fe.dim,.dim{color:var(--mute)}
+.btn.revb{color:var(--amb);border-color:#6a4a10;margin-bottom:8px}
+.kd{display:grid;grid-template-columns:1fr 34px 34px 44px 40px;gap:4px;padding:8px 0;border-top:1px solid var(--line);font-size:14px;text-align:right}
+.kd span:first-child{text-align:left;color:var(--txt)}
+.kd i{font-style:normal;font-size:10px;color:var(--mute);letter-spacing:1px}
+.kd.hd{font-size:10px;letter-spacing:2px;color:var(--mute);border-top:0}
+.kd.me span:first-child{color:var(--grn)}
+.basenav{display:flex;flex-direction:column;align-items:center;gap:6px;margin:6px 0 16px;color:var(--tm);letter-spacing:2px}
+body.tdm .capd .big{color:var(--tm)}
 .diag .ct{font-size:12px}.diag .sub2{font-size:11px;color:var(--mute);letter-spacing:1px;margin:10px 0 2px}
 .modename{font-family:var(--sten);font-size:22px;color:var(--grn);letter-spacing:1px;margin:0 0 14px}
 body.apoc .modename{color:#ff4a3d}
@@ -209,7 +241,57 @@ const pad3 = n => String(Math.round(n)%360).padStart(3,'0');
 const fmt = ms => { const s = Math.ceil(Math.max(0,ms)/1000); return pad(Math.floor(s/60))+':'+pad(s%60); };
 const fmtUp = ms => { const s = Math.floor(Math.max(0,ms)/1000); return pad(Math.floor(s/60))+':'+pad(s%60); };
 const fmtDist = m => m >= 1000 ? (m/1000).toFixed(1)+'KM' : Math.round(m)+'M';
-const vib = p => { try{ navigator.vibrate && navigator.vibrate(p); }catch(e){} };
+/* ---------- buzz + sound ----------
+   Android buzzes; iPhones can't, so every cue also plays a short sound (Web Audio).
+   Sound starts after the first screen tap (browser rule) and can be turned off in the lobby. */
+const buzz = p => { try{ navigator.vibrate && navigator.vibrate(p); }catch(e){} };
+let actx = null, soundOn = (() => { try{ return localStorage.getItem('jb_sound') !== '0'; }catch(e){ return true; } })();
+function audioUnlock(){
+  try{
+    // iOS: play even with the ring/silent switch on (Safari 16.4+)
+    if(navigator.audioSession && navigator.audioSession.type !== 'playback') navigator.audioSession.type = 'playback';
+    if(!actx){ const AC = window.AudioContext || window.webkitAudioContext; if(!AC) return; actx = new AC(); }
+    if(actx.state === 'suspended') actx.resume();
+  }catch(e){}
+}
+document.addEventListener('pointerdown', audioUnlock, true);
+function tone(freq, at, dur, type = 'square', vol = 0.18, slideTo){
+  if(!actx || actx.state !== 'running') return;
+  const t = actx.currentTime + at, o = actx.createOscillator(), g = actx.createGain();
+  o.type = type; o.frequency.setValueAtTime(freq, t);
+  if(slideTo) o.frequency.exponentialRampToValueAtTime(slideTo, t + dur);
+  g.gain.setValueAtTime(0.0001, t);
+  g.gain.exponentialRampToValueAtTime(vol, t + 0.01);
+  g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+  o.connect(g); g.connect(actx.destination); o.start(t); o.stop(t + dur + 0.02);
+}
+// pattern beeps for generic buzzes: each "on" segment becomes a beep
+function beep(p, freq = 620){
+  const arr = Array.isArray(p) ? p : [p]; let t = 0;
+  arr.forEach((ms, i) => { if(i % 2 === 0) tone(freq, t, Math.max(0.04, ms / 1000), 'square', 0.12); t += ms / 1000; });
+}
+const SOUNDS = {
+  tick:     () => tone(1800, 0, 0.03, 'sine', 0.08),
+  inrange:  () => tone(1400, 0, 0.06, 'sine', 0.16),
+  contact:  () => { tone(1000, 0, 0.06, 'sine'); tone(1300, 0.08, 0.06, 'sine'); },
+  shot:     () => tone(260, 0, 0.09, 'sawtooth', 0.16, 70),
+  rifle:    () => { tone(180, 0, 0.25, 'sawtooth', 0.22, 40); tone(1200, 0, 0.05, 'square', 0.08); },
+  hitmark:  () => { tone(1500, 0, 0.05, 'square', 0.12); tone(2000, 0.06, 0.06, 'square', 0.12); },
+  hit:      () => { tone(150, 0, 0.12, 'square', 0.25, 90); tone(150, 0.16, 0.12, 'square', 0.25, 90); },
+  down:     () => tone(500, 0, 0.8, 'sawtooth', 0.2, 60),
+  sniper:   () => tone(500, 0, 0.8, 'sine', 0.18, 1500),
+  turret:   () => [0, 0.2, 0.4].forEach(t => tone(950, t, 0.12, 'square', 0.18)),
+  heart:    () => { tone(70, 0, 0.12, 'sine', 0.35); tone(60, 0.18, 0.14, 'sine', 0.3); },
+  revive:   () => [523, 659, 784].forEach((f, i) => tone(f, i * 0.1, 0.14, 'triangle', 0.2)),
+  go:       () => [440, 554, 659, 880].forEach((f, i) => tone(f, i * 0.12, 0.16, 'square', 0.15)),
+  alert:    () => { tone(880, 0, 0.1); tone(880, 0.16, 0.1); },
+  bad:      () => { tone(300, 0, 0.18, 'square', 0.18); tone(220, 0.2, 0.3, 'square', 0.18); },
+  free:     () => [392, 523, 659, 784].forEach((f, i) => tone(f, i * 0.09, 0.12, 'triangle', 0.2)),
+  end:      () => [784, 659, 523].forEach((f, i) => tone(f, i * 0.18, 0.25, 'triangle', 0.2))
+};
+const vib = p => { buzz(p); if(soundOn) beep(p); };
+const cue = (name, p) => { if(p) buzz(p); if(soundOn && SOUNDS[name]) SOUNDS[name](); };
+function setSound(on){ soundOn = on; try{ localStorage.setItem('jb_sound', on ? '1' : '0'); }catch(e){} if(on){ audioUnlock(); setTimeout(() => SOUNDS.go(), 60); } }
 const $ = id => document.getElementById(id);
 const set = (id, t) => { const el = $(id); if(el && el.textContent !== t) el.textContent = t; };
 function distM(a,b){
@@ -413,11 +495,13 @@ function route(){
   const g = S.game, me = S.me;
   if(g.round !== S.round){
     S.round = g.round; S.endCalledAt = 0; S.trail = new Map(); S.lastPosId = 0; S.seen = new Set();
+    tdmResetRound();
     S.contacts = []; S.caughtSeen = new Set(); S.caughtInit = false; S.nearby = []; S.nearbyKey = ''; S.nearbyAt = 0; S.statusSeen = new Map(); S.tx = { last:null, lastT:0, sending:false, ok:null, err:'' }; S.prevPhase = null;
   }
   let kind;
   if(g.status === 'lobby') kind = 'lobby';
   else if(g.status === 'ended') kind = 'results';
+  else if(g.game_mode === 'tdm') kind = me.life === 'downed' ? 'downed' : me.life === 'dead' ? 'dead' : 'soldier';
   else if(me.role === 'guard') kind = 'guard';
   else if(me.role === 'prisoner' && me.status === 'active') kind = 'prisoner';
   else kind = 'captured';
@@ -427,12 +511,13 @@ function route(){
     const prev = S.mode;
     teardown();
     S.mode = kind; S.modeKey = key;
-    if(prev === 'prisoner' && kind === 'captured') vib([300,100,300]);
+    if(prev === 'prisoner' && kind === 'captured') cue('bad', [300,100,300]);
     const turned = prev === 'prisoner' && kind === 'guard';
-    if(kind === 'results') vib([120,80,120,80,400]);
+    if(kind === 'results') cue('end', [120,80,120,80,400]);
     RENDER[kind]();
-    if(turned){ vib([500,150,500]); toast("YOU'VE BEEN INFECTED — HUNT THE LIVING",'red'); }
-    if(prev === 'captured' && kind === 'prisoner'){ vib([150,80,150,80,600]); toast("YOU'RE FREE — 10 SECONDS TO RUN"); }
+    if(turned){ cue('down', [500,150,500]); toast("YOU'VE BEEN INFECTED — HUNT THE LIVING",'red'); }
+    if(prev === 'downed' && kind === 'soldier'){ cue('revive', [100,60,300]); toast('PATCHED UP — 1 ♥, KEEP HEALING'); }
+    if(prev === 'captured' && kind === 'prisoner'){ cue('free', [150,80,150,80,600]); toast("YOU'RE FREE — 10 SECONDS TO RUN"); }
   } else if(UPDATE[kind]) UPDATE[kind]();
 }
 
@@ -441,8 +526,8 @@ function teardown(){
   if(S.raf) cancelAnimationFrame(S.raf);
   S.raf = null; S.scope = null;
   keepAwake(false);
-  document.body.classList.remove('dark');
-  S.locked = false;
+  document.body.classList.remove('dark', 'tdm');
+  S.locked = false; S.scoping = false; S.scopePos = null;
 }
 
 function tick(){
@@ -453,12 +538,17 @@ function tick(){
     sb.rpc('check_end', { p_game:S.game.id }).then(() => refresh());
   }
   if(ph && S.prevPhase === 'head' && ph.p === 'hunt'){
-    vib([200,120,200,120,400]);
+    cue('go', [200,120,200,120,400]);
     if(S.mode === 'guard') toast('HUNT IS LIVE');
+    if(S.mode === 'soldier') toast('WEAPONS FREE');
   }
   S.prevPhase = ph ? ph.p : null;
   if(S.mode === 'prisoner' || S.mode === 'guard' || (S.mode === 'captured' && rescueOn() && S.me && S.me.role === 'prisoner')) maybeSend();
   if(S.mode === 'prisoner') pollNearby();
+  if(S.mode === 'soldier' || S.mode === 'downed' || S.mode === 'dead'){
+    maybeSend(); pollView(); pollEvents();
+    if(S.mode === 'soldier' && S.view && S.view.me.cls === 'medic') medicTick();
+  }
   if(S.mode === 'guard') pollPositions();
   if(TICK[S.mode]) TICK[S.mode](ph);
 }
@@ -497,6 +587,9 @@ function renderHome(msg='', code=''){
   <div class="panel brief"><div class="lbl">Apocalypse</div>
     <p>It starts with one <b style="color:#ff4a3d">ZOMBIE</b>. Every survivor who gets bitten turns and joins the hunt.</p>
     <p>Will anyone still be human when the clock runs out?</p>
+  </div>
+  <div class="panel brief"><div class="lbl">Team Deathmatch</div>
+    <p>Red vs. Blue with classes: rifleman, sniper, medic, commander and spy. Your phone aims and fires; hearts, revives and respawns at base. Most kills wins.</p>
   </div>
   <div class="panel brief"><div class="lbl">Test range</div>
     <p>No game. Everyone transmits and tracks everyone, with live GPS diagnostics. Use it to check accuracy and radar behavior.</p>
@@ -543,11 +636,14 @@ const SETTINGS = [
   ['Head start','headstart_sec',[[60,'1 MIN'],[120,'2 MIN'],[180,'3 MIN'],[300,'5 MIN']]],
   ['Op length','duration_sec',[[300,'5 MIN'],[600,'10 MIN'],[900,'15 MIN'],[1200,'20 MIN'],[1800,'30 MIN']]],
   ['Radar','radar_mode',[['motion','MOTION ONLY'],['full','FULL TRACK']]],
-  ['Jailbreaks','rescue_on',[[0,'OFF'],[1,'ON']]]
+  ['Jailbreaks','rescue_on',[[0,'OFF'],[1,'ON']]],
+  ['Class limit','class_limit',[[0,'NONE'],[1,'1 EACH PER TEAM']]]
 ];
-function settingRow([label, field, opts], host){
+function settingRow([label, field, opts0], host){
+  let opts = opts0;
   let cur = S.game[field];
-  if(field === 'rescue_on') cur = cur ? 1 : 0;
+  if(field === 'rescue_on' || field === 'class_limit') cur = cur ? 1 : 0;
+  if(field === 'headstart_sec' && isTdm()){ label = 'Deploy time'; opts = [[30,'30 S'],[60,'1 MIN'],[120,'2 MIN'],[180,'3 MIN']]; }
   if(field === 'guard_count') label = T().startCount;
   if(host){
     return `<div class="setrow"><span>${label}</span><select data-set="${field}">${
@@ -563,7 +659,8 @@ UPDATE.lobby = () => {
   const gc = g.guard_count || 1;
   if(S.gps.ok && S.me && S.me.gps_ok !== true && !S.gps.reportFailed) reportGps(true);
   S.pickGuards = S.pickGuards.filter(id => S.players.some(p => p.user_id === id)).slice(0, gc);
-  const key = JSON.stringify([g.game_mode,g.rescue_on,g.headstart_sec,g.duration_sec,gc,g.radar_mode,g.scent_sec,g.host_id,g.round,
+  const key = JSON.stringify([g.game_mode,g.rescue_on,g.class_limit,g.red_lat,g.blue_lat,
+    S.players.map(p => (p.team || '-') + (p.cls || '')),g.headstart_sec,g.duration_sec,gc,g.radar_mode,g.scent_sec,g.host_id,g.round,
     S.players.map(p => p.user_id + p.callsign + p.gps_ok), S.pickGuards, S.gps.ok, S.gps.lobbyMsg, S.gps.acc, S.compassOn]);
   if(key === S.lobbyKey) return;
   S.lobbyKey = key;
@@ -581,17 +678,19 @@ UPDATE.lobby = () => {
   ${host ? `<div class="modepick">
       <button data-act="gmode" data-v="jailbreak" class="${!g.game_mode || g.game_mode === 'jailbreak' ? 'on' : ''}">JAIL BREAK</button>
       <button data-act="gmode" data-v="apocalypse" class="ap ${g.game_mode === 'apocalypse' ? 'on' : ''}">APOCALYPSE</button>
+      <button data-act="gmode" data-v="tdm" class="dm ${g.game_mode === 'tdm' ? 'on' : ''}">DEATHMATCH</button>
       <button data-act="gmode" data-v="test" class="ts ${g.game_mode === 'test' ? 'on' : ''}">TEST</button>
     </div>` : `<div class="modename">${T().name}</div>`}
-  <div class="panel"><div class="lbl">Roster${host && !isTest() ? ` · tap to assign ${T().hunter.toLowerCase()}${gc > 1 ? 's' : ''}` : ''}</div>
+  ${isTdm() ? tdmLobbyPanels() : `<div class="panel"><div class="lbl">Roster${host && !isTest() ? ` · tap to assign ${T().hunter.toLowerCase()}${gc > 1 ? 's' : ''}` : ''}</div>
     <ul class="roster">${S.players.map(p => `
        <li ${host && !isTest() ? `data-act="pick" data-v="${p.user_id}"` : ''} class="${isG(p.user_id) ? 'sel' : ''}">
         <span>${esc(p.callsign)}</span>
         <span class="tags">${isG(p.user_id) ? `<i class="amb">${T().hunter}</i>` : ''}${p.user_id === g.host_id ? '<i>HOST</i>' : ''}${p.user_id === S.user.id ? '<i>YOU</i>' : ''}${p.gps_ok ? '<i class="g">GPS</i>' : '<i class="r">NO GPS</i>'}</span>
       </li>`).join('')}</ul>
     ${isTest() ? `<div class="note">Everyone is an operator. No head start, no winner. Each phone sees all the others.</div>` : host ? `<div class="note">${guardNote}${gc > n - 1 && n >= 2 ? ` <span class="amb">Only ${n - 1} ${n - 1 > 1 ? hns : hn} possible with ${n} players.</span>` : ''}</div>` : ''}
-  </div>
-  <div class="panel"><div class="lbl">Rules of engagement</div>${SETTINGS.filter(s => (!isTest() || !['guard_count','headstart_sec'].includes(s[1])) && (s[1] !== 'rescue_on' || (g.game_mode || 'jailbreak') === 'jailbreak')).map(s => settingRow(s, host)).join('')}
+  </div>`}
+  <div class="panel"><div class="lbl">Rules of engagement</div>${SETTINGS.filter(s => (!isTest() || !['guard_count','headstart_sec'].includes(s[1])) && (s[1] !== 'rescue_on' || (g.game_mode || 'jailbreak') === 'jailbreak')
+      && (isTdm() ? !['guard_count','radar_mode'].includes(s[1]) : s[1] !== 'class_limit')).map(s => settingRow(s, host)).join('')}
     ${(g.game_mode || 'jailbreak') === 'jailbreak' && g.rescue_on ? `<div class="note">Freeze tag: a free prisoner who gets within ~8 m (24 ft) of a captured one sees their name, holds it for 10 seconds, and breaks them out. Both get 10 seconds of protection.</div>` : ''}</div>
   <div class="panel"><div class="lbl">Systems check</div>
     <div class="row2">
@@ -599,6 +698,8 @@ UPDATE.lobby = () => {
         S.gps.ok ? `GPS ✓${S.gps.acc ? ' ±' + Math.round(S.gps.acc) + 'M' : ''}` : S.gps.denied ? 'GPS BLOCKED' : S.gps.lobbyMsg || 'ARM GPS'}</button>
       <button class="btn sm ${S.compassOn ? 'ok' : ''}" data-act="armcompass">${S.compassOn ? 'COMPASS ✓' : 'ARM COMPASS'}</button>
     </div>
+    <button class="btn sm ${soundOn ? 'ok' : ''}" style="margin:10px 0 0" data-act="sound">${soundOn ? 'SOUND ON · TAP TO MUTE' : 'SOUND OFF · TAP TO TURN ON'}</button>
+    <div class="note">Sound cues play for hits, warnings and alerts (iPhones can't vibrate from a web app). An earbud keeps you from giving away your position.</div>
     ${S.gps.ok && S.gps.acc > 500 ? `<div class="note" style="color:var(--amb)">Accuracy is ±${Math.round(S.gps.acc)} m — Precise Location is probably off for this browser. Turn it on in the phone's Location settings.</div>` : ''}
     ${S.gps.denied ? `<div class="note" style="color:var(--red)">Location is blocked on this phone. Tap GPS BLOCKED for how to fix it.</div>` : ''}
     <div class="note">Everyone arm GPS now — the roster shows who still needs to. Compass helps if you end up hunting.${'wakeLock' in navigator ? ' The app keeps your screen awake during the op.' : ' <span class="amb">This browser can\'t keep the screen awake — set Auto-Lock to Never before the op.</span>'}</div>
@@ -606,19 +707,23 @@ UPDATE.lobby = () => {
   ${(() => { const missing = S.players.filter(p => !p.gps_ok).map(p => esc(p.callsign));
       return host && missing.length ? `<div class="note" style="color:var(--amb);margin:-4px 0 12px">No GPS yet: ${missing.join(', ')}. They need to tap ARM GPS (and allow location) before you start.</div>` : ''; })()}
   ${host
-    ? (isTest() ? `<button class="btn solid" data-act="start">START TEST</button>`
+    ? (isTdm() ? (tdmStartBlocker() ? `<div class="note" style="color:var(--amb);margin:-4px 0 12px">${tdmStartBlocker()}</div><button class="btn solid" disabled>START BATTLE</button>`
+                 : `<button class="btn solid" data-act="start" ${n < 2 ? 'disabled' : ''}>${n < 2 ? 'NEED 2+ PLAYERS' : 'START BATTLE'}</button>`)
+     : isTest() ? `<button class="btn solid" data-act="start">START TEST</button>`
        : `<button class="btn solid" data-act="start" ${n < 2 ? 'disabled' : ''}>${n < 2 ? 'NEED 2+ PLAYERS' : 'START OP'}</button>`)
     : `<div class="wait">STANDING BY FOR HOST…</div>`}
   <button class="btn sm ghost" data-act="leave">LEAVE OP</button>`;
 };
 async function changeSetting(field, raw){
   const g = S.game; const v = (field === 'radar_mode' || field === 'game_mode') ? raw : parseInt(raw, 10);
+  if(field === 'game_mode' && raw === 'tdm' && (g.headstart_sec || 0) > 180) { /* keep deploy time sensible */ g.headstart_sec = 60; }
   const next = { ...g, [field]:v };
   S.game = next;
   const { error } = await sb.rpc('update_settings', {
     p_game:g.id, p_headstart:next.headstart_sec, p_duration:next.duration_sec,
     p_radius:next.catch_radius_m, p_mode:next.radar_mode, p_scent:next.scent_sec,
-    p_guards:next.guard_count || 1, p_game_mode:next.game_mode || 'jailbreak', p_rescue:!!next.rescue_on
+    p_guards:next.guard_count || 1, p_game_mode:next.game_mode || 'jailbreak', p_rescue:!!next.rescue_on,
+    p_class_limit:!!next.class_limit
   });
   if(error) toast(errMsg(error),'red');
   refresh();
@@ -754,9 +859,10 @@ async function maybeSend(){
   if(!g || g.status !== 'active' || !f || t.sending) return;
   const ph = phase(); if(!ph || ph.p === 'over') return;
   const since = Date.now() - t.lastT;
-  if(since < 2500) return;
+  const fast = isTdm();
+  if(since < (fast ? 2000 : 2500)) return;
   const moved = t.last ? distM(t.last, f) : Infinity;
-  if(!(moved >= 3 || since >= 10000)) return;
+  if(!(moved >= (fast ? 1 : 3) || since >= (fast ? 5000 : 10000))) return;
   t.sending = true;
   const { error } = await sb.from('positions').insert({
     game_id:g.id, round:g.round, user_id:S.user.id, lat:f.lat, lng:f.lng, acc:Math.round(f.acc)
@@ -774,7 +880,7 @@ async function pollNearby(){
     if(!error){
       const before = (S.nearby || []).length;
       S.nearby = data || [];
-      if(S.nearby.length && !before){ vib([80,60,80]); if(S.locked) setLock(false); }
+      if(S.nearby.length && !before){ cue('contact', [80,60,80]); if(S.locked) setLock(false); }
       renderNearby();
     }
   }finally{ S.nearbyBusy = false; }
@@ -802,7 +908,7 @@ async function completeFree(){
   const { data, error } = await sb.rpc('complete_free', { p_game:S.game.id, p_lat:f.lat, p_lng:f.lng });
   S.nearbyKey = ''; S.nearbyAt = 0;
   if(error){ toast(errMsg(error),'red'); cancelFree(); return; }
-  vib([150,80,150,80,600]);
+  cue('free', [150,80,150,80,600]);
   toast(`${data && data.freed ? data.freed + ' IS FREE' : 'FREED'} — RUN! 10S PROTECTION`);
   refresh();
 }
@@ -869,7 +975,7 @@ TICK.captured = ph => {
   if(res){
     const left = Math.max(0, 10 - Math.floor((now() - Date.parse(res.freeing_started))/1000));
     set('cFree', `${res.callsign} IS BREAKING YOU OUT… ${left}S`);
-    if(!S.rescueBuzz){ S.rescueBuzz = true; vib([80,60,80]); }
+    if(!S.rescueBuzz){ S.rescueBuzz = true; cue('contact', [80,60,80]); }
   } else { set('cFree', t.ok === false ? 'SIGNAL NOT SENDING — TEAMMATES CAN\'T FIND YOU' : ''); S.rescueBuzz = false; }
 };
 
@@ -950,18 +1056,18 @@ function analyze(){
   for(const p of S.players){
     const ck = p.user_id + '|' + p.caught_at;
     if(p.caught_at && !S.caughtSeen.has(ck)){
-      if(S.caughtInit) { vib([100,60,300]); toast(T().confirm + p.callsign); }
+      if(S.caughtInit) { cue('alert', [100,60,300]); toast(T().confirm + p.callsign); }
       S.caughtSeen.add(ck);
     }
     const was = S.statusSeen.get(p.user_id);
     if(S.caughtInit && was === 'caught' && p.status === 'active' && p.role === 'prisoner'){
-      vib([300,100,300]); toast('BREAKOUT: ' + p.callsign + ' IS FREE', 'amb');
+      cue('bad', [300,100,300]); toast('BREAKOUT: ' + p.callsign + ' IS FREE', 'amb');
     }
     S.statusSeen.set(p.user_id, p.status);
   }
   S.caughtInit = true;
   for(const c of out){
-    if(c.state === 'live' && !S.seen.has(c.id)){ S.seen.add(c.id); vib(60); }
+    if(c.state === 'live' && !S.seen.has(c.id)){ S.seen.add(c.id); cue('contact', 60); }
     if(c.state !== 'live') S.seen.delete(c.id);
   }
 }
@@ -1199,6 +1305,7 @@ RENDER.results = () => {
   const tail = `${isHost() ? `<button class="btn solid" data-act="rematch">NEW ROUND</button>` : `<div class="wait">AWAITING HOST FOR NEXT ROUND…</div>`}
   <button class="btn sm ghost" data-act="leave">LEAVE OP</button>`;
 
+  if(g.game_mode === 'tdm'){ tdmResults(tail); return; }
   if(g.game_mode === 'test'){
     $app.innerHTML = `
     <div class="res g"><div class="lbl">Test range · round ${g.round}</div><div class="res-big">TEST COMPLETE</div>
@@ -1247,6 +1354,571 @@ RENDER.results = () => {
   </div>${tail}`;
 };
 
+/* =====================================================================
+   DEATHMATCH — team deathmatch with classes
+   The server decides every hit. Phones only get distances/bearings they're
+   allowed to know from tdm_view, never raw positions.
+   ===================================================================== */
+const isTdm = () => !!(S.game && S.game.game_mode === 'tdm');
+const CLASSES = {
+  rifleman: { name:'RIFLEMAN',  hearts:3, icon:'R', blurb:'Pistol 10 m. Solid all-rounder.' },
+  sniper:   { name:'SNIPER',    hearts:3, icon:'S', blurb:'Rifle 30 m: aim the phone, stand still to charge (1/2/3 ♥ at 3/6/8 s). Pistol up close.' },
+  medic:    { name:'MEDIC',     hearts:5, icon:'+', blurb:'Revives the downed (hold 15 s). Heals 1 ♥ / 10 s nearby. Slow pistol. Glows on enemy radar while healing. Can\'t heal medics.' },
+  commander:{ name:'COMMANDER', hearts:2, icon:'C', blurb:'15 m aura: unmasks spies, +5 m pistol range for teammates, faster sniping and healing.' },
+  spy:      { name:'SPY',       hearts:2, icon:'X', blurb:'Knife out: looks friendly, can cloak, tap a shoulder = instant kill. Pistol out: exposed, 5 m.' }
+};
+const TEAM = { red:{ name:'RED', col:'#ff5a4a', rgb:'255,90,74' }, blue:{ name:'BLUE', col:'#4aa8ff', rgb:'74,168,255' } };
+const tcol = t => (TEAM[t] || { col:'#9aa' }).col;
+const hearts = (h, m) => '♥'.repeat(Math.max(0, h || 0)) + '<span class="hx">' + '♥'.repeat(Math.max(0, (m || 0) - (h || 0))) + '</span>';
+
+TXT.tdm = { ...TXT.jailbreak, name:'TEAM DEATHMATCH', alive:'SCORE' };
+
+/* ---------- lobby pieces ---------- */
+function tdmLobbyPanels(){
+  const g = S.game, me = S.me, mine = me.team, host = isHost();
+  const teamList = t => S.players.filter(p => p.team === t);
+  const none = S.players.filter(p => !p.team);
+  // you only see your own team's classes (no scouting the enemy spy)
+  const plist = (arr) => arr.map(p => `<li><span>${esc(p.callsign)}</span><span class="tags">${p.user_id === S.user.id || (mine && p.team === mine) ? `<i>${CLASSES[p.cls || 'rifleman'].name}</i>` : ''}${p.user_id === S.user.id ? '<i>YOU</i>' : ''}${p.gps_ok ? '<i class="g">GPS</i>' : '<i class="r">NO GPS</i>'}</span></li>`).join('');
+  const baseSet = t => t === 'red' ? g.red_lat != null : g.blue_lat != null;
+  return `
+  <div class="panel"><div class="lbl">Your team</div>
+    <div class="row2">
+      <button class="btn tbtn ${mine === 'red' ? 'on' : ''}" style="--tc:${TEAM.red.col}" data-act="team" data-v="red">RED · ${teamList('red').length}</button>
+      <button class="btn tbtn ${mine === 'blue' ? 'on' : ''}" style="--tc:${TEAM.blue.col}" data-act="team" data-v="blue">BLUE · ${teamList('blue').length}</button>
+    </div>
+    ${host ? `<button class="btn sm ghost" style="margin:10px 0 0" data-act="shuffle">SHUFFLE TEAMS</button>` : ''}
+  </div>
+  <div class="panel"><div class="lbl">Your class</div>
+    <div class="clsgrid">${Object.entries(CLASSES).map(([k, c]) => `
+      <button class="clsb ${(me.cls || 'rifleman') === k ? 'on' : ''}" data-act="cls" data-v="${k}">
+        <b>${c.name}</b><span class="hrt">${'♥'.repeat(c.hearts)}</span></button>`).join('')}</div>
+    <div class="note">${CLASSES[me.cls || 'rifleman'].blurb}</div>
+  </div>
+  <div class="panel"><div class="lbl">Bases · respawn points</div>
+    <div class="ct"><span style="color:${TEAM.red.col}">RED BASE</span><span>${baseSet('red') ? 'SET ✓' : '<span class="amb">NOT SET</span>'}</span></div>
+    <div class="ct"><span style="color:${TEAM.blue.col}">BLUE BASE</span><span>${baseSet('blue') ? 'SET ✓' : '<span class="amb">NOT SET</span>'}</span></div>
+    ${mine ? `<button class="btn sm" style="margin:10px 0 0" data-act="setbase">STAND AT ${TEAM[mine].name} BASE · SET IT HERE</button>`
+           : `<div class="note">Pick a team, then anyone on it can stand at your spawn point and set the base.</div>`}
+    ${baseSet('red') && baseSet('blue') && distM({ lat:g.red_lat, lng:g.red_lng }, { lat:g.blue_lat, lng:g.blue_lng }) < 100
+      ? `<div class="note" style="color:var(--amb)">Bases are only ${Math.round(distM({ lat:g.red_lat, lng:g.red_lng }, { lat:g.blue_lat, lng:g.blue_lng }))} m apart. Each base has a 30 m turret, so aim for 100 m+ to leave room to fight.</div>` : ''}
+    <div class="note">Bases should be 100 m+ apart. You respawn by walking back to yours. Nobody can be hit within 15 m of their own base, and each base has a turret: enemies within 30 m get a 3-second warning, then lose 1 ♥ every 2 seconds. Disguised spies slip past. A turret death is Darwinism: it counts as a death, but nobody gets the kill.</div>
+  </div>
+  <div class="panel"><div class="lbl">Roster</div>
+    <div class="lbl" style="color:${TEAM.red.col};margin-top:4px">Red</div><ul class="roster">${plist(teamList('red')) || '<li class="dim"><span>—</span></li>'}</ul>
+    <div class="lbl" style="color:${TEAM.blue.col};margin-top:10px">Blue</div><ul class="roster">${plist(teamList('blue')) || '<li class="dim"><span>—</span></li>'}</ul>
+    ${none.length ? `<div class="lbl" style="margin-top:10px">No team yet (auto-assigned at start)</div><ul class="roster">${plist(none)}</ul>` : ''}
+  </div>`;
+}
+function tdmStartBlocker(){
+  const g = S.game;
+  if(g.red_lat == null || g.blue_lat == null) return 'Set both team bases before starting.';
+  return '';
+}
+async function tdmRpc(fn, args, quiet){
+  const { data, error } = await sb.rpc(fn, { p_game:S.game.id, ...args });
+  if(error){ if(!quiet) toast(errMsg(error), 'red'); return null; }
+  return data === null || data === undefined ? true : data;
+}
+async function doSetBase(){
+  if(!('geolocation' in navigator)){ toast('NO GPS','red'); return; }
+  toast('GETTING A GPS FIX…');
+  navigator.geolocation.getCurrentPosition(async p => {
+    if(p.coords.accuracy > 30) toast(`WEAK GPS (±${Math.round(p.coords.accuracy)} M) — BASE MAY BE OFF`,'amb');
+    if(await tdmRpc('set_base', { p_lat:p.coords.latitude, p_lng:p.coords.longitude })){ toast('BASE SET'); refresh(); }
+  }, () => toast('NO GPS FIX — TRY OUTSIDE','red'), { enableHighAccuracy:true, timeout:15000, maximumAge:0 });
+}
+
+/* ---------- polling ---------- */
+function tdmResetRound(){
+  S.view = null; S.viewAt = 0; S.viewBusy = false; S.lastEv = 0; S.events = []; S.evInit = false; S.evBusy = false; S.evAt = 0;
+  S.medicAt = 0; S.healing = 0; S.suspect = null; S.prevHearts = null; S.prevTarget = false; S.prevWarn = false; S.beatAt = 0;
+}
+async function pollView(){
+  const f = S.gps.fix; if(!f || S.viewBusy || Date.now() - (S.viewAt || 0) < 1500) return;
+  S.viewBusy = true; S.viewAt = Date.now();
+  try{
+    const { data, error } = await sb.rpc('tdm_view', { p_game:S.game.id, p_lat:f.lat, p_lng:f.lng,
+      p_heading: S.heading != null ? Math.round(S.heading) : null });
+    if(error) return;
+    const prev = S.view; S.view = data; S.viewT = Date.now();
+    tdmFeedback(prev, data);
+    if(S.me && data.me.life !== S.me.life) refresh();
+    if(UPDATE[S.mode]) UPDATE[S.mode]();
+  } finally { S.viewBusy = false; }
+}
+function tdmFeedback(prev, v){
+  const me = v.me;
+  if(prev && prev.me.life === 'alive' && me.life === 'alive' && me.hearts < prev.me.hearts){
+    cue('hit', [80,60,80]); toast(me.hearts === 1 ? 'HIT — LAST HEART' : 'HIT — ' + me.hearts + ' ♥ LEFT', 'red');
+  }
+  const tgt = !!v.target;
+  if(tgt && !S.prevTarget) cue('inrange', 30);
+  S.prevTarget = tgt;
+  if(v.sniper_warn && !S.prevWarn){ cue('sniper', 600); toast('SNIPER CHARGING ON YOU — MOVE', 'amb'); }
+  if(me.turret != null && !S.prevTurret){ cue('turret', [300,100,300,100,300]); toast('ENEMY TURRET LOCKING ON — BACK OFF', 'red'); }
+  S.prevTurret = me.turret != null;
+  S.prevWarn = !!v.sniper_warn;
+  if(me.life === 'alive' && me.hearts === 1 && Date.now() - (S.beatAt || 0) > 5000){ S.beatAt = Date.now(); cue('heart', [60,120,60]); }
+}
+async function pollEvents(){
+  if(S.evBusy || Date.now() - (S.evAt || 0) < 2000) return;
+  S.evBusy = true; S.evAt = Date.now();
+  try{
+    const { data, error } = await sb.from('events').select('*').eq('game_id', S.game.id).eq('round', S.game.round)
+      .gt('id', S.lastEv || 0).order('id', { ascending:true }).limit(50);
+    if(error || !data) return;
+    for(const e of data){
+      S.lastEv = Math.max(S.lastEv || 0, Number(e.id));
+      S.events.push(e);
+      if(S.evInit) toast(evText(e, true), e.kind === 'revive' ? '' : 'amb');
+    }
+    S.events = S.events.slice(-30);
+    S.evInit = true;
+    renderFeed();
+  } finally { S.evBusy = false; }
+}
+const tn = (n, t) => `<span style="color:${tcol(t)}">${esc(n || '?')}</span>`;
+function evText(e, plain){
+  const a = plain ? (e.a_name || '?') : tn(e.a_name, e.a_team), b = plain ? (e.b_name || '?') : tn(e.b_name, e.b_team);
+  const w = e.weapon === 'knife' ? 'BACKSTABBED' : e.weapon === 'rifle' ? 'SNIPED' : e.weapon === 'friendly fire' ? 'FRIENDLY FIRE' : 'DOWNED';
+  const other = t => t === 'red' ? 'blue' : 'red';
+  if(e.kind === 'down' && e.weapon === 'turret') return `${b} CAUGHT IN ${plain ? other(e.b_team).toUpperCase() : tn(other(e.b_team).toUpperCase(), other(e.b_team))} TURRET FIRE`;
+  if(e.kind === 'down') return e.a_name ? `${a} ${w} ${b}` : `${b} DOWNED (${w})`;
+  if(e.kind === 'died' && e.weapon === 'turret') return `${b} ELIMINATED · DARWINISM`;
+  if(e.kind === 'kill') return `${b} ELIMINATED · +1 ${plain ? (e.a_team || '').toUpperCase() : tn((e.a_team || '').toUpperCase(), e.a_team)}`;
+  if(e.kind === 'revive') return `${a} REVIVED ${b}`;
+  if(e.kind === 'died') return `${b} ELIMINATED`;
+  return '';
+}
+function renderFeed(){
+  const el = $('feed'); if(!el) return;
+  const list = S.events.slice(-6).reverse();
+  el.innerHTML = list.length ? list.map(e => `<div class="fe">${evText(e)}</div>`).join('') : '<div class="fe dim">NO CONTACT YET</div>';
+}
+async function medicTick(){
+  const f = S.gps.fix; if(!f || Date.now() - (S.medicAt || 0) < 2500) return;
+  S.medicAt = Date.now();
+  const r = await tdmRpc('medic_tick', { p_lat:f.lat, p_lng:f.lng }, true);
+  if(r && typeof r === 'object') S.healing = r.healing || 0;
+}
+
+/* ---------- shared HUD ---------- */
+function tdmHud(){
+  const me = S.me, c = CLASSES[me.cls || 'rifleman'];
+  return `
+  <div class="hud">
+    <div><div class="lbl" style="color:${tcol(me.team)}">${TEAM[me.team] ? TEAM[me.team].name : ''} TEAM</div><div class="hv" style="color:${tcol(me.team)}">${c.name}</div></div>
+    <div class="ctr"><div class="lbl" id="tPhase">—</div><div class="clock" id="tClock">--:--</div></div>
+    <div class="rt"><div class="lbl">Score</div><div class="hv" id="tScore">-</div></div>
+  </div>`;
+}
+function tdmTickHud(ph){
+  if(ph){ set('tPhase', ph.p === 'head' ? 'DEPLOY — NO FIRING' : 'FIGHT'); set('tClock', fmt(ph.left)); }
+  const s = S.view && S.view.score, el = $('tScore');
+  if(s && el){
+    const h = `<span style="color:${TEAM.red.col}">${s.red}</span><span class="dim"> – </span><span style="color:${TEAM.blue.col}">${s.blue}</span>`;
+    if(el.innerHTML !== h) el.innerHTML = h;
+  }
+}
+function viewAge(){ return S.view ? (Date.now() - S.viewT) / 1000 : 0; }
+const left = sec => Math.max(0, Math.ceil((sec || 0) - viewAge()));
+
+/* ---------- soldier (alive) ---------- */
+RENDER.soldier = () => {
+  const me = S.me, cls = me.cls || 'rifleman';
+  document.body.classList.add('dark', 'tdm');
+  document.body.style.setProperty('--tm', tcol(me.team));
+  $app.innerHTML = `
+  ${tdmHud()}
+  <div class="hearts" id="tHearts"></div>
+  <div class="tstat" id="tStat"></div>
+  <div class="scope-wrap"><canvas id="scope"></canvas>
+    <div class="overlay" id="hsOv"><div>DEPLOY</div><div class="big" id="hsClock">--:--</div><div>GET TO POSITION · NO FIRING</div></div></div>
+  <div id="tSus"></div>
+  ${cls === 'spy' ? `
+    <div class="row2" style="margin-bottom:10px">
+      <button class="btn sm" id="wKnife" data-act="weapon" data-v="knife">KNIFE</button>
+      <button class="btn sm" id="wPistol" data-act="weapon" data-v="pistol">PISTOL</button>
+    </div>
+    <button class="btn" id="cloakBtn" data-act="cloak">CLOAK</button>
+    <div class="note" id="knifeNote" style="margin:-4px 0 12px">Knife out: sneak up and tap an enemy on the shoulder. They confirm on their phone.</div>` : ''}
+  <button class="btn fire" id="fireBtn" data-act="fire">FIRE</button>
+  ${cls === 'sniper' ? `
+    <div class="panel"><div class="lbl">Rifle · 30 m · aim with the phone</div>
+      <div class="chg"><div class="chgbar" id="chgBar"></div><i style="left:37.5%"></i><i style="left:75%"></i></div>
+      <div class="ct"><span id="chgTxt">NOT SCOPED</span><span id="aimTxt"></span></div>
+      <div class="row2" style="margin-top:10px">
+        <button class="btn sm" id="scopeBtn" data-act="scope">SCOPE IN</button>
+        <button class="btn sm solid" id="rifleBtn" data-act="rifle">FIRE RIFLE</button>
+      </div>
+      ${S.compassOn ? '' : `<button class="btn sm" style="margin:10px 0 0" data-act="armcompass">ARM COMPASS TO AIM</button>`}
+    </div>` : ''}
+  ${cls === 'medic' ? `<div class="panel"><div class="lbl">Med pack</div><div id="medList"></div><div class="note" id="healTxt"></div></div>` : ''}
+  <div class="panel"><div class="lbl">Kill feed</div><div id="feed"></div></div>
+  <div id="downList"></div>
+  <button class="btn redb hold sm" data-hold="backstab" data-ms="1500">HOLD · I'VE BEEN BACKSTABBED</button>
+  <div class="gps-line" id="gGps">ACQUIRING GPS…</div>
+  ${hostAbort()}`;
+  startGPS(() => maybeSend());
+  keepAwake(true);
+  setupTdmScope();
+  renderFeed();
+  S.medKey = '';
+  UPDATE.soldier();
+};
+UPDATE.soldier = () => {
+  const v = S.view, me = v ? v.me : null;
+  if(!me) return;
+  const hEl = $('tHearts'); if(hEl){ const h = hearts(me.hearts, me.max); if(hEl.innerHTML !== h) hEl.innerHTML = h; }
+  // spy controls
+  if(me.cls === 'spy'){
+    const wi = left(me.weapon_in);
+    const k = $('wKnife'), p = $('wPistol');
+    if(k){ k.classList.toggle('ok', me.weapon === 'knife'); k.textContent = me.weapon === 'knife' && wi ? `KNIFE ${wi}S` : 'KNIFE'; }
+    if(p){ p.classList.toggle('ok', me.weapon === 'pistol'); p.textContent = me.weapon === 'pistol' && wi ? `PISTOL ${wi}S` : 'PISTOL'; }
+    const cb = $('cloakBtn'), cl = left(me.cloak_left), ci = left(me.cloak_in);
+    if(cb){
+      cb.disabled = me.weapon !== 'knife' || (ci > 0 && cl === 0);
+      cb.textContent = cl ? `CLOAKED · ${cl}S` : ci ? `CLOAK RECHARGING · ${ci}S` : me.weapon !== 'knife' ? 'CLOAK (KNIFE ONLY)' : 'CLOAK · 10 S';
+    }
+    const kn = $('knifeNote'); if(kn) kn.style.display = me.weapon === 'knife' ? '' : 'none';
+  }
+  // medic revive list
+  if(me.cls === 'medic'){
+    const list = (v.downed || []), key = list.map(d => d.id).join(',') + '|' + me.boosted;
+    const ml = $('medList');
+    if(ml && key !== S.medKey && !(hold && hold.el.dataset.hold === 'revive')){
+      S.medKey = key;
+      const ms = me.boosted ? 10000 : 15000;
+      ml.innerHTML = list.length ? list.map(d => `<button class="btn hold revb" data-hold="revive" data-v="${esc(d.id)}" data-ms="${ms}">REVIVE ${esc(d.n)} · HOLD ${ms/1000}S</button>`).join('')
+        : '<div class="ct dim"><span>NO DOWNED TEAMMATES WITHIN 8 M</span></div>';
+    }
+    set('healTxt', S.healing ? `HEALING ${S.healing} TEAMMATE${S.healing > 1 ? 'S' : ''} · YOU'RE VISIBLE TO ENEMIES` : 'Stay within 8 m of hurt teammates to heal them (1 ♥ / 10 s).');
+  }
+  // downed teammates anywhere on radar
+  const dl = $('downList');
+  if(dl){
+    const downed = (v.contacts || []).filter(c => c.k === 'f' && c.l === 'downed');
+    const h = downed.length ? `<div class="panel"><div class="lbl">Downed teammates</div>${downed.map(c => `<div class="ct lost"><span>${esc(c.n)}</span><span>${fmtDist(c.d)} · ${pad3(c.b)}°</span></div>`).join('')}</div>` : '';
+    if(dl.innerHTML !== h) dl.innerHTML = h;
+  }
+};
+TICK.soldier = ph => {
+  tdmTickHud(ph);
+  const ov = $('hsOv'); if(ov) ov.classList.toggle('on', !!ph && ph.p === 'head');
+  if(ph && ph.p === 'head') set('hsClock', fmt(ph.left));
+  const v = S.view, me = v && v.me;
+  const f = S.gps.fix;
+  set('gGps', f ? `GPS ±${Math.round(f.acc)}M${S.heading != null ? ' · HDG ' + pad3(S.heading) + '°' : ''} · RANGE ${me ? me.range : '-'} M` : 'ACQUIRING GPS…');
+  if(!me) return;
+  // status line
+  const st = [];
+  if(left(me.safe_left)) st.push(`<span class="grn">SPAWN PROTECTED ${left(me.safe_left)}S</span>`);
+  if(me.boosted) st.push(`<span style="color:var(--tm)">COMMANDER BOOST</span>`);
+  if(me.cls === 'spy'){
+    if(left(me.cloak_left)) st.push('<span class="grn">CLOAKED</span>');
+    else if(me.weapon === 'knife' && !left(me.exposed_left)) st.push('<span class="grn">DISGUISED</span>');
+    else st.push(`<span class="redt">EXPOSED${left(me.exposed_left) ? ' ' + left(me.exposed_left) + 'S' : ''}</span>`);
+  }
+  if(v.sniper_warn) st.push('<span class="amb">⚠ SNIPER CHARGING</span>');
+  if(me.turret != null){
+    const t = me.turret + viewAge();
+    st.push(t < 3 ? `<span class="redt">⚠ TURRET LOCKING ON ${Math.max(1, Math.ceil(3 - t))}S — BACK OFF</span>` : '<span class="redt">⚠ UNDER TURRET FIRE — GET OUT</span>');
+  }
+  const sh = st.join(' · '); const se = $('tStat'); if(se && se.innerHTML !== sh) se.innerHTML = sh;
+  // fire button
+  const fb = $('fireBtn');
+  if(fb){
+    const reload = left(me.shot_in), live = ph && ph.p === 'hunt';
+    const spyKnife = me.cls === 'spy' && (me.weapon !== 'pistol' || left(me.weapon_in));
+    fb.style.display = spyKnife ? 'none' : '';
+    fb.disabled = !live || reload > 0;
+    fb.classList.toggle('lit', !!v.target && live && !reload);
+    const t = !live ? 'HOLD FIRE' : reload ? `RELOADING ${reload}S` : S.suspect ? `FIRE AT "${S.suspect.n}"?` : v.target ? `FIRE · ${fmtDist(v.target.d)} ${pad3(v.target.b)}°` : 'FIRE · NO TARGET';
+    if(fb.textContent !== t) fb.textContent = t;
+  }
+  // suspect bar
+  const sus = $('tSus');
+  if(sus){
+    const h = S.suspect ? `<div class="susbar">SUSPECT: "${esc(S.suspect.n)}" · next shot targets them. Wrong guess costs you a heart. <button class="btn sm ghost" data-act="clearsus">CLEAR</button></div>` : '';
+    if(sus.innerHTML !== h) sus.innerHTML = h;
+  }
+  // sniper
+  if(me.cls === 'sniper'){
+    const scoped = me.charge > 0 || S.scoping;
+    const secs = (me.charge || 0) + (scoped && S.view ? viewAge() * (me.boosted ? 1.5 : 1) : 0);
+    const bar = $('chgBar'); if(bar) bar.style.width = Math.min(100, secs / 8 * 100) + '%';
+    const dmg = secs >= 7.8 ? 3 : secs >= 5.8 ? 2 : secs >= 2.8 ? 1 : 0;
+    set('chgTxt', scoped ? (dmg ? `CHARGED · ${'♥'.repeat(dmg)} DAMAGE` : 'CHARGING… HOLD STILL') : 'NOT SCOPED');
+    set('aimTxt', S.heading == null ? 'NO COMPASS' : v.aim ? 'ON TARGET' : 'NO TARGET IN SIGHT');
+    const ab = $('aimTxt'); if(ab) ab.style.color = v.aim && S.heading != null ? 'var(--grn)' : '';
+    set('scopeBtn', scoped ? 'CANCEL SCOPE' : 'SCOPE IN');
+    const rb = $('rifleBtn'); if(rb) rb.disabled = !scoped || dmg === 0 || !(ph && ph.p === 'hunt');
+    // moving cancels the scope
+    if(scoped && S.scopePos && f && distM(S.scopePos, f) > 7){ S.scoping = false; S.scopePos = null; tdmRpc('cancel_charge', {}, true); toast('YOU MOVED — SCOPE RESET','amb'); }
+  }
+};
+
+/* ---------- downed ---------- */
+RENDER.downed = () => {
+  document.body.classList.add('dark', 'tdm');
+  document.body.style.setProperty('--tm', tcol(S.me.team));
+  $app.innerHTML = `
+  ${tdmHud()}
+  <div class="capd">
+    <div class="big">DOWNED</div>
+    <div class="p-row"><span>BLEEDING OUT</span><span id="bleed">--</span></div>
+    <div class="p-warn" id="revTxt" style="font-size:16px"></div>
+    <p>Stay put. A medic within 8 m can patch you up. If nobody comes, give up and walk back to base to respawn.</p>
+    <button class="btn hold" data-hold="giveup" data-ms="1500">HOLD · GIVE UP</button>
+    <div class="panel" style="text-align:left"><div class="lbl">Kill feed</div><div id="feed"></div></div>
+    ${hostAbort()}
+  </div>`;
+  startGPS(() => maybeSend());
+  keepAwake(true);
+  renderFeed();
+  cue('down', [400,100,400]);
+};
+TICK.downed = ph => {
+  tdmTickHud(ph);
+  const me = S.view && S.view.me; if(!me) return;
+  set('bleed', me.bleed_left != null ? left(me.bleed_left) + 'S' : '--');
+  set('revTxt', me.reviver ? `${me.reviver.n} IS PATCHING YOU UP… ${left(me.reviver.left)}S` : '');
+};
+
+/* ---------- eliminated / respawn ---------- */
+RENDER.dead = () => {
+  document.body.classList.add('dark', 'tdm');
+  document.body.style.setProperty('--tm', tcol(S.me.team));
+  $app.innerHTML = `
+  ${tdmHud()}
+  <div class="capd" style="padding-top:10px">
+    <div class="big">ELIMINATED</div>
+    <p>Walk back to your base to respawn. Switch class first if you like: the enemy won't know what you came back as.</p>
+    <div class="basenav"><canvas id="baseArrow" width="160" height="160"></canvas><div id="baseTxt">--</div></div>
+    <div class="panel" style="text-align:left"><div class="lbl">Respawn as</div>
+      <div class="clsgrid">${Object.entries(CLASSES).map(([k, c]) => `
+        <button class="clsb ${(S.me.cls || 'rifleman') === k ? 'on' : ''}" data-act="cls" data-v="${k}"><b>${c.name}</b><span class="hrt">${'♥'.repeat(c.hearts)}</span></button>`).join('')}</div>
+    </div>
+    <button class="btn solid" id="respBtn" data-act="respawn" disabled>RESPAWN</button>
+    <div class="panel" style="text-align:left"><div class="lbl">Kill feed</div><div id="feed"></div></div>
+    ${hostAbort()}
+  </div>`;
+  startGPS(() => maybeSend());
+  keepAwake(true);
+  renderFeed();
+};
+TICK.dead = ph => {
+  tdmTickHud(ph);
+  const me = S.view && S.view.me, base = me && me.base;
+  const rb = $('respBtn'); if(rb) rb.disabled = !base || base.d > 15;
+  set('baseTxt', base ? (base.d <= 15 ? 'AT BASE — RESPAWN READY' : `BASE ${fmtDist(base.d)} · ${pad3(base.b)}°${S.heading == null ? ' (ARROW: NORTH-UP)' : ''}`) : 'WAITING FOR GPS…');
+  const cv = $('baseArrow'); if(!cv || !base) return;
+  const ctx = cv.getContext('2d'); ctx.clearRect(0, 0, 160, 160);
+  const rot = ((base.b - (S.heading != null ? S.heading : 0)) * Math.PI) / 180;
+  ctx.save(); ctx.translate(80, 80); ctx.rotate(rot);
+  ctx.fillStyle = tcol(S.me.team); ctx.shadowColor = tcol(S.me.team); ctx.shadowBlur = 14;
+  ctx.beginPath(); ctx.moveTo(0, -60); ctx.lineTo(30, 20); ctx.lineTo(0, 6); ctx.lineTo(-30, 20); ctx.closePath(); ctx.fill();
+  ctx.restore();
+
+};
+
+/* ---------- radar ---------- */
+function setupTdmScope(){
+  const cv = $('scope'); if(!cv) return;
+  S.scope = { cv, ctx:cv.getContext('2d'), size:0 };
+  sizeScope();
+  cv.addEventListener('click', onScopeTap);
+  S.raf = requestAnimationFrame(drawTdm);
+}
+function tdmScale(){
+  const me = S.view && S.view.me;
+  return Math.max(20, ((me && me.radar) || 10) * 1.6); // meters at the rim
+}
+function contactXY(c, cx, cy, R, span, rot){
+  const a = (c.b - rot) * Math.PI / 180;
+  let r = c.d / span * R, edge = false;
+  if(r > R - 8){ r = R - 8; edge = true; }
+  return { x:cx + Math.sin(a) * r, y:cy - Math.cos(a) * r, edge };
+}
+function onScopeTap(e){
+  if(!S.view || !S.scope) return;
+  const rect = S.scope.cv.getBoundingClientRect(), x = e.clientX - rect.left, y = e.clientY - rect.top;
+  const size = S.scope.size, cx = size/2, cy = size/2, R = size/2 - 6, span = tdmScale(), rot = S.heading != null ? S.heading : 0;
+  let best = null, bd = 28;
+  for(const c of S.view.contacts){
+    if(c.k !== 'f' || c.l !== 'alive') continue;
+    const p = contactXY(c, cx, cy, R, span, rot), d = Math.hypot(p.x - x, p.y - y);
+    if(d < bd){ bd = d; best = c; }
+  }
+  if(best){ S.suspect = { t:best.t, n:best.n }; cue('tick', 20); toast(`SUSPECT MARKED: "${best.n}"`, 'amb'); }
+}
+const blinkT = ts => 0.5 + 0.5 * Math.sin((ts || 0) / 160);
+function drawTdm(ts){
+  if(!S.scope) return;
+  S.raf = requestAnimationFrame(drawTdm);
+  const { ctx, size } = S.scope; if(!size) return;
+  const cx = size/2, cy = size/2, R = size/2 - 6, G = '61,255,139', A = '255,176,32';
+  const v = S.view, me = v && v.me, span = tdmScale();
+  const rot = S.heading != null ? S.heading : 0;
+  const FONT = '"Share Tech Mono", monospace';
+  ctx.clearRect(0, 0, size, size);
+  const bg = ctx.createRadialGradient(cx, cy, 0, cx, cy, R);
+  bg.addColorStop(0, '#061a10'); bg.addColorStop(1, '#010503');
+  ctx.fillStyle = bg; ctx.beginPath(); ctx.arc(cx, cy, R, 0, Math.PI*2); ctx.fill();
+  ctx.save(); ctx.beginPath(); ctx.arc(cx, cy, R, 0, Math.PI*2); ctx.clip();
+  ctx.strokeStyle = `rgba(${G},.14)`; ctx.lineWidth = 1;
+  for(let k = 1; k <= 3; k++){ ctx.beginPath(); ctx.arc(cx, cy, R*k/3, 0, Math.PI*2); ctx.stroke(); }
+  // kill-range ring
+  if(me){
+    ctx.strokeStyle = `rgba(${A},.55)`; ctx.setLineDash([4, 4]);
+    ctx.beginPath(); ctx.arc(cx, cy, me.range / span * R, 0, Math.PI*2); ctx.stroke();
+    if(me.cls === 'sniper'){ ctx.strokeStyle = `rgba(${A},.3)`; ctx.beginPath(); ctx.arc(cx, cy, Math.min(R, 30 / span * R), 0, Math.PI*2); ctx.stroke(); }
+    ctx.setLineDash([]);
+    ctx.fillStyle = `rgba(${A},.6)`; ctx.font = `10px ${FONT}`; ctx.textAlign = 'left';
+    ctx.fillText(me.range + 'm', cx + 3, cy - me.range / span * R - 3);
+  }
+  // sniper aim cone (screen-up = where the phone points)
+  if(me && me.cls === 'sniper' && S.heading != null){
+    ctx.fillStyle = v.aim ? 'rgba(61,255,139,.12)' : 'rgba(255,255,255,.05)';
+    ctx.beginPath(); ctx.moveTo(cx, cy); ctx.arc(cx, cy, Math.min(R, 30 / span * R), -Math.PI/2 - 0.35, -Math.PI/2 + 0.35); ctx.closePath(); ctx.fill();
+  }
+  // sweep
+  const sw = ((ts || 0) % 3000) / 3000 * Math.PI * 2;
+  ctx.strokeStyle = `rgba(${G},.5)`; ctx.lineWidth = 1.5;
+  ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(cx + Math.sin(sw)*R, cy - Math.cos(sw)*R); ctx.stroke();
+  if(v && me){
+    // enemy turret zone (30 m around their base)
+    if(me.eb && me.eb.d - 30 < span){
+      const p = contactXY({ d:me.eb.d, b:me.eb.b }, cx, cy, R, span, rot);
+      const a = (me.eb.b - rot) * Math.PI / 180, rr = me.eb.d / span * R;
+      const ex = cx + Math.sin(a) * rr, ey = cy - Math.cos(a) * rr, zr = 30 / span * R;
+      ctx.fillStyle = `rgba(255,59,59,${me.turret != null ? 0.18 + 0.12*blinkT(ts) : 0.1})`; ctx.strokeStyle = 'rgba(255,59,59,.7)'; ctx.lineWidth = 1.5;
+      ctx.beginPath(); ctx.arc(ex, ey, zr, 0, Math.PI*2); ctx.fill(); ctx.stroke();
+      if(rr < R){ ctx.fillStyle = 'rgba(255,59,59,.9)'; ctx.font = `10px ${FONT}`; ctx.textAlign = 'center'; ctx.fillText('TURRET', ex, ey); }
+      else { ctx.fillStyle = 'rgba(255,59,59,.9)'; ctx.font = `10px ${FONT}`; ctx.textAlign = 'center'; ctx.fillText('TURRET ' + fmtDist(me.eb.d), p.x, p.y); }
+    }
+    // base
+    if(me.base){
+      const p = contactXY(me.base, cx, cy, R, span, rot);
+      ctx.strokeStyle = tcol(me.team); ctx.lineWidth = 1.5;
+      ctx.beginPath(); ctx.moveTo(p.x - 7, p.y + 5); ctx.lineTo(p.x, p.y - 6); ctx.lineTo(p.x + 7, p.y + 5); ctx.closePath(); ctx.stroke();
+      ctx.fillStyle = tcol(me.team); ctx.font = `10px ${FONT}`; ctx.textAlign = 'center'; ctx.fillText('BASE', p.x, p.y + 16);
+    }
+    const blink = 0.5 + 0.5 * Math.sin((ts || 0) / 160);
+    for(const c of v.contacts){
+      const p = contactXY(c, cx, cy, R, span, rot);
+      ctx.textAlign = 'left'; ctx.font = `11px ${FONT}`; ctx.textBaseline = 'middle';
+      const lab = (txt, col) => { ctx.fillStyle = col; if(p.x > cx + R*0.35){ ctx.textAlign = 'right'; ctx.fillText(txt, p.x - 9, p.y); } else ctx.fillText(txt, p.x + 9, p.y); };
+      if(c.k === 'f'){
+        const col = tcol(me.team), down = c.l === 'downed';
+        ctx.strokeStyle = col; ctx.fillStyle = down ? `rgba(255,176,32,${blink})` : col + '55'; ctx.lineWidth = 1.5;
+        ctx.beginPath(); ctx.rect(p.x - 5, p.y - 5, 10, 10); ctx.fill(); ctx.stroke();
+        const sel = S.suspect && S.suspect.t === c.t;
+        if(sel){ ctx.strokeStyle = `rgba(${A},1)`; ctx.beginPath(); ctx.arc(p.x, p.y, 11, 0, Math.PI*2); ctx.stroke(); }
+        lab(c.n + (down ? ' DOWN' : '') + (p.edge ? ' ' + fmtDist(c.d) : ''), down ? `rgba(${A},.95)` : col);
+      } else if(c.k === 'e'){
+        const col = c.s ? 'rgba(160,160,160,.8)' : '#ff3b3b';
+        ctx.fillStyle = col; ctx.shadowColor = col; ctx.shadowBlur = 12;
+        ctx.beginPath(); ctx.moveTo(p.x, p.y - 7); ctx.lineTo(p.x + 7, p.y + 6); ctx.lineTo(p.x - 7, p.y + 6); ctx.closePath(); ctx.fill();
+        ctx.shadowBlur = 0;
+        lab((CLASSES[c.c] ? CLASSES[c.c].name : 'ENEMY') + (c.rv ? ' (UNMASKED)' : '') + (c.s ? ' · SAFE' : ''), col);
+      } else if(c.k === 'm'){
+        ctx.fillStyle = `rgba(255,59,59,${0.5 + 0.5*blink})`;
+        ctx.fillRect(p.x - 2, p.y - 7, 4, 14); ctx.fillRect(p.x - 7, p.y - 2, 14, 4);
+        lab('MEDIC ' + fmtDist(c.d), 'rgba(255,59,59,.85)');
+      }
+    }
+  } else {
+    ctx.fillStyle = `rgba(${A},.9)`; ctx.font = `13px ${FONT}`; ctx.textAlign = 'center';
+    ctx.fillText(S.gps.fix ? 'LINKING…' : 'ACQUIRING GPS…', cx, cy + 34);
+  }
+  ctx.restore();
+  // rim + N marker
+  ctx.strokeStyle = `rgba(${G},.55)`; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.arc(cx, cy, R, 0, Math.PI*2); ctx.stroke();
+  const na = -rot * Math.PI / 180;
+  ctx.fillStyle = `rgba(${A},.95)`; ctx.font = `12px ${FONT}`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillText('N', cx + Math.sin(na)*(R-14), cy - Math.cos(na)*(R-14));
+  // me
+  ctx.fillStyle = me ? tcol(me.team) : '#eafff2';
+  ctx.beginPath(); ctx.moveTo(cx, cy - 9); ctx.lineTo(cx + 6, cy + 6); ctx.lineTo(cx, cy + 3); ctx.lineTo(cx - 6, cy + 6); ctx.closePath(); ctx.fill();
+}
+
+/* ---------- actions ---------- */
+async function doFire(){
+  const f = S.gps.fix; if(!f){ toast('NO GPS FIX','amb'); return; }
+  cue('shot');
+  let r;
+  if(S.suspect){
+    r = await tdmRpc('fire_at', { p_tok:S.suspect.t, p_lat:f.lat, p_lng:f.lng });
+    S.suspect = null;
+    if(r && r.friendly){ cue('bad', [200,80,200]); toast('THAT WAS YOUR TEAMMATE — YOU LOST A HEART','red'); }
+    else if(r && r.hit){ cue('hitmark', [40,40,40]); toast(`SPY UNMASKED: HIT ${r.hit}${r.down ? ' — DOWN!' : ''}`); }
+    else if(r) toast('MISS','amb');
+  } else {
+    r = await tdmRpc('fire_pistol', { p_lat:f.lat, p_lng:f.lng });
+    if(r && r.hit){ cue('hitmark', 40); toast(`HIT ${CLASSES[r.cls] ? CLASSES[r.cls].name : ''}${r.down ? ' — DOWN!' : ''}`); }
+    else if(r) toast('MISS — NO TARGET IN RANGE','amb');
+  }
+  S.viewAt = 0; pollView();
+}
+async function doScope(){
+  const me = S.view && S.view.me, f = S.gps.fix; if(!f){ toast('NO GPS FIX','amb'); return; }
+  if(me && (me.charge > 0 || S.scoping)){ S.scoping = false; S.scopePos = null; await tdmRpc('cancel_charge', {}, true); }
+  else if(await tdmRpc('start_charge', { p_lat:f.lat, p_lng:f.lng })){ S.scoping = true; S.scopePos = { lat:f.lat, lng:f.lng }; toast('SCOPED — HOLD STILL'); }
+  S.viewAt = 0; pollView();
+}
+async function doRifle(){
+  const f = S.gps.fix; if(!f) return;
+  cue('rifle');
+  if(S.heading == null) toast('NO COMPASS — FIRING AT NEAREST','amb');
+  const r = await tdmRpc('fire_rifle', { p_lat:f.lat, p_lng:f.lng, p_heading:S.heading != null ? S.heading : null });
+  S.scoping = false; S.scopePos = null;
+  if(r && r.hit){ cue('hitmark', [40,40,120]); toast(`SNIPED ${CLASSES[r.cls] ? CLASSES[r.cls].name : ''} · ${'♥'.repeat(r.dmg)}${r.down ? ' — DOWN!' : ''}`); }
+  else if(r) toast('MISS — NOTHING IN YOUR SIGHTS','amb');
+  S.viewAt = 0; pollView();
+}
+async function doRespawn(){
+  const f = S.gps.fix; if(!f){ toast('NO GPS FIX','amb'); return; }
+  if(await tdmRpc('respawn', { p_lat:f.lat, p_lng:f.lng })){ cue('revive', [100,60,100]); toast('BACK IN THE FIGHT — 5 S PROTECTION'); S.viewAt = 0; refresh(); }
+}
+async function tdmHold(what, el){
+  const f = S.gps.fix;
+  if(what === 'backstab'){
+    if(!f){ toast('NO GPS FIX','amb'); return; }
+    const r = await tdmRpc('backstab', { p_lat:f.lat, p_lng:f.lng });
+    if(r && r.by){ toast(`BACKSTABBED BY ${r.by}`,'red'); refresh(); }
+  } else if(what === 'giveup'){
+    if(await tdmRpc('give_up', {})) refresh();
+  } else if(what === 'revive'){
+    if(!f) return;
+    const r = await tdmRpc('complete_revive', { p_lat:f.lat, p_lng:f.lng });
+    S.medKey = '';
+    if(r && r.revived){ cue('revive', [100,60,300]); toast(`${r.revived} IS BACK UP`); }
+    else tdmRpc('cancel_revive', {}, true);
+    S.viewAt = 0; pollView();
+  }
+}
+
+/* ---------- results ---------- */
+function tdmResults(tail){
+  const g = S.game, w = g.winner;
+  const team = t => S.players.filter(p => p.team === t).sort((a, b) => b.kills - a.kills || a.deaths - b.deaths);
+  const score = t => S.players.filter(p => p.team === t).reduce((s, p) => s + (p.kills || 0), 0);
+  const kd = p => p.deaths ? (p.kills / p.deaths).toFixed(1) : (p.kills || 0).toFixed(1);
+  const table = t => `
+    <div class="panel"><div class="lbl" style="color:${TEAM[t].col}">${TEAM[t].name} · ${score(t)} KILLS</div>
+      <div class="kd hd"><span>PLAYER</span><span>K</span><span>D</span><span>K/D</span><span>REV</span></div>
+      ${team(t).map(p => `<div class="kd${p.user_id === S.user.id ? ' me' : ''}"><span>${esc(p.callsign)} <i>${CLASSES[p.cls || 'rifleman'].name}${p.darwins ? ` · DARWIN ×${p.darwins}` : ''}</i></span><span>${p.kills || 0}</span><span>${p.deaths || 0}</span><span>${kd(p)}</span><span>${p.t_revives || 0}</span></div>`).join('')}
+    </div>`;
+  $app.innerHTML = `
+  <div class="res"><div class="lbl">Team Deathmatch · round ${g.round}</div>
+    <div class="res-big" style="color:${w === 'tie' ? 'var(--amb)' : tcol(w)}">${w === 'tie' ? 'DRAW' : TEAM[w] ? TEAM[w].name + ' WINS' : 'OVER'}</div>
+    <div class="res-sub"><span style="color:${TEAM.red.col}">${score('red')}</span> – <span style="color:${TEAM.blue.col}">${score('blue')}</span></div></div>
+  ${table(w === 'blue' ? 'blue' : 'red')}${table(w === 'blue' ? 'red' : 'blue')}${tail}`;
+}
+
 /* ---------- input ---------- */
 document.addEventListener('click', e => {
   const el = e.target.closest('[data-act]'); if(!el) return;
@@ -1264,13 +1936,30 @@ document.addEventListener('click', e => {
     UPDATE.lobby();
   }
   else if(act === 'start') doStart();
+  else if(act === 'sound'){ setSound(!soundOn); S.lobbyKey = ''; UPDATE.lobby(); }
+  else if(act === 'team') tdmRpc('set_team', { p_team:el.dataset.v }).then(ok => ok && refresh());
+  else if(act === 'cls') tdmRpc('set_class', { p_cls:el.dataset.v }).then(ok => {
+    if(!ok) return;
+    S.me.cls = el.dataset.v;
+    document.querySelectorAll('.clsb').forEach(b => b.classList.toggle('on', b.dataset.v === el.dataset.v));
+    refresh();
+  });
+  else if(act === 'setbase') doSetBase();
+  else if(act === 'shuffle') tdmRpc('shuffle_teams', {}).then(ok => ok && refresh());
+  else if(act === 'fire') doFire();
+  else if(act === 'clearsus'){ S.suspect = null; }
+  else if(act === 'scope') doScope();
+  else if(act === 'rifle') doRifle();
+  else if(act === 'weapon') tdmRpc('spy_weapon', { p_weapon:el.dataset.v }).then(() => { S.viewAt = 0; pollView(); });
+  else if(act === 'cloak') tdmRpc('spy_cloak', {}).then(ok => { if(ok){ cue('tick', 60); toast('CLOAKED — 10 S'); } S.viewAt = 0; pollView(); });
+  else if(act === 'respawn') doRespawn();
   else if(act === 'leave') doLeave();
   else if(act === 'armgps'){ if(S.gps.denied) showGpsHelp(true); else armGPS(); }
   else if(act === 'reload') location.reload();
   else if(act === 'install' && deferredInstall){ deferredInstall.prompt(); deferredInstall.userChoice.finally(() => { deferredInstall = null; if(S.mode === 'home') renderHome(); }); }
   else if(act === 'noinstall'){ LS.set('jb_hide_install', '1'); const el = e.target.closest('.install'); if(el) el.remove(); }
   else if(act === 'hidegps') showGpsHelp(false);
-  else if(act === 'armcompass') ensureCompass().then(ok => { if(ok){ toast('COMPASS ARMED'); if(S.mode === 'lobby') UPDATE.lobby(); } });
+  else if(act === 'armcompass') ensureCompass().then(ok => { if(ok){ toast('COMPASS ARMED'); if(S.mode === 'lobby') UPDATE.lobby(); el.remove && S.mode === 'soldier' && el.remove(); } });
   else if(act === 'rematch') doRematch();
   else if(act === 'hdg') toggleHeading();
   else if(act === 'range'){
@@ -1298,11 +1987,16 @@ document.addEventListener('pointerdown', e => {
   if(el.dataset.hold === 'free'){
     beginFree(el.dataset.v).then(ok => { if(!ok && hold && hold.el === el){ el.style.setProperty('--p', 0); hold = null; } });
   }
+  if(el.dataset.hold === 'revive'){
+    const f = S.gps.fix;
+    tdmRpc('begin_revive', { p_target:el.dataset.v, p_lat:f ? f.lat : 0, p_lng:f ? f.lng : 0 })
+      .then(ok => { if(!ok && hold && hold.el === el){ el.style.setProperty('--p', 0); hold = null; } });
+  }
   const step = () => {
     if(!hold || hold.el !== el) return;
     const p = Math.min(1, (performance.now() - t0) / ms);
     el.style.setProperty('--p', p);
-    if(p >= 1){ hold = null; el.style.setProperty('--p', 0); vib(40); onHold(el.dataset.hold, el); return; }
+    if(p >= 1){ hold = null; el.style.setProperty('--p', 0); cue('tick', 40); onHold(el.dataset.hold, el); return; }
     requestAnimationFrame(step);
   };
   requestAnimationFrame(step);
@@ -1311,6 +2005,7 @@ const cancelHold = () => {
   if(!hold) return;
   const el = hold.el; el.style.setProperty('--p', 0); hold = null;
   if(el.dataset.hold === 'free'){ cancelFree(); toast('KEEP HOLDING FOR 10 SECONDS','amb'); }
+  if(el.dataset.hold === 'revive'){ tdmRpc('cancel_revive', {}, true); toast('KEEP HOLDING TO REVIVE','amb'); }
 };
 document.addEventListener('pointerup', cancelHold);
 document.addEventListener('pointercancel', cancelHold);
@@ -1318,6 +2013,7 @@ document.addEventListener('contextmenu', e => { if(e.target.closest('[data-hold]
 
 async function onHold(what, el){
   if(what === 'free'){ completeFree(); return; }
+  if(what === 'backstab' || what === 'giveup' || what === 'revive'){ tdmHold(what, el); return; }
   if(what === 'unlock'){ S.lastActivity = Date.now(); setLock(false); }
   else if(what === 'surrender'){
     const { error } = await sb.rpc('surrender', { p_game:S.game.id });
