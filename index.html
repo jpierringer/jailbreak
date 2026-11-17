@@ -56,6 +56,8 @@ body.tdm{--tm:#4aa8ff}
 .btn.fire.lit{background:#ff3b3b;border-color:#ff3b3b;color:#fff;box-shadow:0 0 18px rgba(255,59,59,.45)}
 .chg{position:relative;height:14px;border:1px solid var(--line);margin-bottom:6px}
 .chg i{position:absolute;top:0;bottom:0;width:1px;background:var(--mute)}
+.btn.rifle{margin:10px 0 0;padding:22px 10px;font-size:16px;touch-action:none;-webkit-user-select:none;user-select:none}
+.btn.rifle.held{background:rgba(255,59,59,.18);border-color:#ff3b3b;color:#ff8a8a}
 .chgbar{height:100%;width:0;background:linear-gradient(90deg,#1e7a47,#ffb020,#ff3b3b)}
 .susbar{border:1px solid #6a4a10;color:var(--amb);font-size:12px;line-height:1.5;padding:8px 10px;margin-bottom:10px}
 .susbar .btn{margin:8px 0 0}
@@ -547,7 +549,7 @@ function teardown(){
   S.raf = null; S.scope = null;
   keepAwake(false);
   document.body.classList.remove('dark', 'tdm');
-  S.locked = false; S.scoping = false; S.scopePos = null;
+  S.locked = false; if(S.rifle) rifleCancel(true);
 }
 
 function tick(){
@@ -1495,7 +1497,7 @@ async function doSetBase(){
 /* ---------- polling ---------- */
 function tdmResetRound(){
   S.view = null; S.viewAt = 0; S.viewBusy = false; S.lastEv = 0; S.events = []; S.evInit = false; S.evBusy = false; S.evAt = 0;
-  S.medicAt = 0; S.healing = 0; S.suspect = null; S.prevHearts = null; S.prevTarget = false; S.prevWarn = false; S.beatAt = 0;
+  S.medicAt = 0; S.healing = 0; S.suspect = null; S.rifle = null; S.prevHearts = null; S.prevTarget = false; S.prevWarn = false; S.beatAt = 0;
 }
 async function pollView(){
   const f = S.gps.fix; if(!f || S.viewBusy || Date.now() - (S.viewAt || 0) < 1500) return;
@@ -1610,11 +1612,9 @@ RENDER.soldier = () => {
   ${cls === 'sniper' ? `
     <div class="panel"><div class="lbl">Rifle · 30 m · aim with the phone</div>
       <div class="chg"><div class="chgbar" id="chgBar"></div><i style="left:37.5%"></i><i style="left:75%"></i></div>
-      <div class="ct"><span id="chgTxt">NOT SCOPED</span><span id="aimTxt"></span></div>
-      <div class="row2" style="margin-top:10px">
-        <button class="btn sm" id="scopeBtn" data-act="scope">SCOPE IN</button>
-        <button class="btn sm solid" id="rifleBtn" data-act="rifle">FIRE RIFLE</button>
-      </div>
+      <div class="ct"><span id="chgTxt">READY</span><span id="aimTxt"></span></div>
+      <button class="btn rifle" id="rifleBtn">HOLD TO CHARGE · RELEASE TO FIRE</button>
+      <div class="note" style="margin-top:6px">Stand still while you hold: 3 s = 1 ♥, 6 s = 2 ♥, 8 s = 3 ♥. Let go before 3 s to cancel.</div>
       ${S.compassOn ? '' : `<button class="btn sm" style="margin:10px 0 0" data-act="armcompass">ARM COMPASS TO AIM</button>`}
     </div>` : ''}
   ${cls === 'medic' ? `<div class="panel"><div class="lbl">Med pack</div><div id="medList"></div><div class="note" id="healTxt"></div></div>` : ''}
@@ -1626,6 +1626,7 @@ RENDER.soldier = () => {
   startGPS(() => maybeSend());
   keepAwake(true);
   setupTdmScope();
+  setupRifle();
   renderFeed();
   S.medKey = '';
   UPDATE.soldier();
@@ -1709,17 +1710,20 @@ TICK.soldier = ph => {
   }
   // sniper
   if(me.cls === 'sniper'){
-    const scoped = me.charge > 0 || S.scoping;
-    const secs = (me.charge || 0) + (scoped && S.view ? viewAge() * (me.boosted ? 1.5 : 1) : 0);
+    const secs = rifleSecs(), dmg = rifleDmg(secs);
     const bar = $('chgBar'); if(bar) bar.style.width = Math.min(100, secs / 8 * 100) + '%';
-    const dmg = secs >= 7.8 ? 3 : secs >= 5.8 ? 2 : secs >= 2.8 ? 1 : 0;
-    set('chgTxt', scoped ? (dmg ? `CHARGED · ${'♥'.repeat(dmg)} DAMAGE` : 'CHARGING… HOLD STILL') : 'NOT SCOPED');
+    set('chgTxt', S.rifle ? (dmg ? `RELEASE TO FIRE · ${'♥'.repeat(dmg)}` : 'CHARGING… HOLD STILL') : 'READY');
     set('aimTxt', S.heading == null ? 'NO COMPASS' : v.aim ? 'ON TARGET' : 'NO TARGET IN SIGHT');
     const ab = $('aimTxt'); if(ab) ab.style.color = v.aim && S.heading != null ? 'var(--grn)' : '';
-    set('scopeBtn', scoped ? 'CANCEL SCOPE' : 'SCOPE IN');
-    const rb = $('rifleBtn'); if(rb) rb.disabled = !scoped || dmg === 0 || !(ph && ph.p === 'hunt');
-    // moving cancels the scope
-    if(scoped && S.scopePos && f && distM(S.scopePos, f) > 7){ S.scoping = false; S.scopePos = null; tdmRpc('cancel_charge', {}, true); toast('YOU MOVED — SCOPE RESET','amb'); }
+    const rb = $('rifleBtn');
+    if(rb){
+      rb.disabled = !(ph && ph.p === 'hunt') && !S.rifle;
+      set('rifleBtn', S.rifle ? (dmg ? `RELEASE TO FIRE · ${'♥'.repeat(dmg)}` : `CHARGING ${secs.toFixed(1)} S`) : !(ph && ph.p === 'hunt') ? 'HOLD FIRE' : 'HOLD TO CHARGE · RELEASE TO FIRE');
+    }
+    // a click as each heart level is reached, so you can charge without looking
+    if(S.rifle && dmg > (S.rifle.level || 0)){ S.rifle.level = dmg; cue('tick', 25); }
+    // moving more than 7 m cancels the shot
+    if(S.rifle && S.rifle.pos && f && distM(S.rifle.pos, f) > 7){ rifleCancel(); toast('YOU MOVED — SHOT CANCELLED','amb'); }
   }
 };
 
@@ -1926,21 +1930,52 @@ async function doFire(){
   }
   S.viewAt = 0; pollView();
 }
-async function doScope(){
-  const me = S.view && S.view.me, f = S.gps.fix; if(!f){ toast('NO GPS FIX','amb'); return; }
-  if(me && (me.charge > 0 || S.scoping)){ S.scoping = false; S.scopePos = null; await tdmRpc('cancel_charge', {}, true); }
-  else if(await tdmRpc('start_charge', { p_lat:f.lat, p_lng:f.lng })){ S.scoping = true; S.scopePos = { lat:f.lat, lng:f.lng }; toast('SCOPED — HOLD STILL'); }
-  S.viewAt = 0; pollView();
+// ---- sniper rifle: press and hold to charge, release to fire ----
+// charge time is measured on the server too (start_charge → fire_rifle); the local timer just drives the bar
+function rifleSecs(){
+  if(!S.rifle) return 0;
+  const boost = S.view && S.view.me.boosted ? 1.5 : 1;
+  return (performance.now() - S.rifle.t0) / 1000 * boost;
 }
-async function doRifle(){
+const rifleDmg = secs => secs >= 7.8 ? 3 : secs >= 5.8 ? 2 : secs >= 2.8 ? 1 : 0;
+function rifleDown(e){
+  e.preventDefault();
+  const btn = e.currentTarget, ph = phase(), f = S.gps.fix;
+  if(S.rifle || !(ph && ph.p === 'hunt')) return;
+  if(!f){ toast('NO GPS FIX','amb'); return; }
+  try{ btn.setPointerCapture(e.pointerId); }catch(_){}
+  btn.classList.add('held');
+  S.rifle = { t0:performance.now(), pos:{ lat:f.lat, lng:f.lng }, level:0,
+              started: tdmRpc('start_charge', { p_lat:f.lat, p_lng:f.lng }) };
+  S.rifle.started.then(ok => { if(!ok) rifleCancel(true); });
+}
+function rifleCancel(silent){
+  const b = $('rifleBtn'); if(b) b.classList.remove('held');
+  if(!S.rifle) return;
+  const started = S.rifle.started; S.rifle = null;
+  if(started) started.then(() => tdmRpc('cancel_charge', {}, true));
+  if(!silent) S.viewAt = 0;
+}
+async function rifleUp(e){
+  const b = $('rifleBtn'); if(b) b.classList.remove('held');
+  if(!S.rifle) return;
+  const shot = S.rifle, secs = rifleSecs(); S.rifle = null;
+  if(rifleDmg(secs) === 0){ shot.started.then(() => tdmRpc('cancel_charge', {}, true)); toast('TOO SOON — HOLD AT LEAST 3 S','amb'); return; }
+  const ok = await shot.started; if(!ok) return;   // make sure the charge was registered before firing
   const f = S.gps.fix; if(!f) return;
   cue('rifle');
   if(S.heading == null) toast('NO COMPASS — FIRING AT NEAREST','amb');
   const r = await tdmRpc('fire_rifle', { p_lat:f.lat, p_lng:f.lng, p_heading:S.heading != null ? S.heading : null });
-  S.scoping = false; S.scopePos = null;
   if(r && r.hit){ cue('hitmark', [40,40,120]); toast(`SNIPED ${CLASSES[r.cls] ? CLASSES[r.cls].name : ''} · ${'♥'.repeat(r.dmg)}${r.down ? ' — DOWN!' : ''}`); }
   else if(r) toast('MISS — NOTHING IN YOUR SIGHTS','amb');
   S.viewAt = 0; pollView();
+}
+function setupRifle(){
+  const b = $('rifleBtn'); if(!b) return;
+  b.addEventListener('pointerdown', rifleDown);
+  b.addEventListener('pointerup', rifleUp);
+  b.addEventListener('pointercancel', () => rifleCancel());   // e.g. a phone call or the OS taking the touch
+  b.addEventListener('contextmenu', e => e.preventDefault());
 }
 async function doRespawn(){
   const f = S.gps.fix; if(!f){ toast('NO GPS FIX','amb'); return; }
@@ -2011,8 +2046,6 @@ document.addEventListener('click', e => {
   else if(act === 'shuffle') tdmRpc('shuffle_teams', {}).then(ok => ok && refresh());
   else if(act === 'fire') doFire();
   else if(act === 'clearsus'){ S.suspect = null; }
-  else if(act === 'scope') doScope();
-  else if(act === 'rifle') doRifle();
   else if(act === 'weapon') tdmRpc('spy_weapon', { p_weapon:el.dataset.v }).then(() => { S.viewAt = 0; pollView(); });
   else if(act === 'cloak') tdmRpc('spy_cloak', {}).then(ok => { if(ok){ cue('tick', 60); toast('CLOAKED — 10 S'); } S.viewAt = 0; pollView(); });
   else if(act === 'respawn') doRespawn();
