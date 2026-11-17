@@ -121,6 +121,18 @@ input.f::placeholder{color:#24382b}
 .btn:disabled{opacity:.35}
 .hold{position:relative;overflow:hidden;isolation:isolate}
 .hold::before{content:"";position:absolute;left:0;top:0;bottom:0;width:calc(var(--p,0) * 100%);background:currentColor;opacity:.22;z-index:-1}
+.choice .ch-h{display:flex;gap:12px;align-items:flex-start;margin-bottom:12px}
+.choice .ch-h b{display:block;font-family:var(--head);font-size:19px;letter-spacing:3px;color:var(--grn)}
+.choice .ch-h small{display:block;font-size:12px;color:var(--mute);line-height:1.5;margin-top:3px}
+.ch-n{flex:0 0 30px;height:30px;border:1px solid var(--grn2);color:var(--grn);display:flex;align-items:center;justify-content:center;font-family:var(--head);font-weight:700}
+.choice.host .ch-h b{color:var(--amb)} .choice.host .ch-n{border-color:#6a4a10;color:var(--amb)}
+.choice.host .btn{color:var(--amb);border-color:#6a4a10;margin:0}
+.choice .code-in{text-align:center;font-size:30px;letter-spacing:12px;margin-bottom:10px}
+.choice #joinBtn{margin:0}
+.choice #joinBtn:disabled{opacity:1;background:transparent;color:var(--mute);border-color:var(--line)}
+.choice .code-in::placeholder{letter-spacing:4px;font-size:20px}
+.orsep{display:flex;align-items:center;gap:12px;margin:2px 0 16px;color:var(--mute);font-size:12px;letter-spacing:4px}
+.orsep::before,.orsep::after{content:"";flex:1;height:1px;background:var(--line)}
 .err ul{margin:6px 0 0;padding-left:18px}.err li{margin:2px 0}.err b{color:#ff8a8a}
 .err:empty{display:none}
 .err{color:var(--red);font-size:13px;letter-spacing:1px;margin:-4px 0 14px;line-height:1.5}
@@ -601,10 +613,16 @@ function renderHome(msg='', code=''){
     <div class="note">Every player needs GPS (where you are) and the compass (which way you're facing). Allow both when your phone asks.</div>
   </div>
   <div class="err" id="homeErr"></div>
-  <div class="panel"><div class="lbl">Join an op</div>
-    <div class="row"><input class="f" id="code" maxlength="5" placeholder="CODE" autocomplete="off" autocapitalize="characters" spellcheck="false" value="${esc(code)}">
-    <button class="btn" style="width:auto" data-act="join">JOIN</button></div></div>
-  <button class="btn solid" data-act="create">CREATE NEW OP</button>
+  <div class="panel choice">
+    <div class="ch-h"><span class="ch-n">A</span><div><b>JOIN A FRIEND'S OP</b><small>Someone already made a game and gave you a 5-letter code.</small></div></div>
+    <input class="f code-in" id="code" maxlength="5" placeholder="ENTER CODE" autocomplete="off" autocapitalize="characters" spellcheck="false" value="${esc(code)}">
+    <button class="btn solid" id="joinBtn" data-act="join" ${code.length === 5 ? '' : 'disabled'}>JOIN WITH THIS CODE</button>
+  </div>
+  <div class="orsep"><span>OR</span></div>
+  <div class="panel choice host">
+    <div class="ch-h"><span class="ch-n">B</span><div><b>HOST A NEW OP</b><small>Start your own game. You'll get a code to share with everyone else.</small></div></div>
+    <button class="btn" data-act="create">CREATE NEW OP</button>
+  </div>
   ${msg ? `<div class="err">${esc(msg)}</div>` : ''}
   ${installHint()}
   <div class="panel brief"><div class="lbl">Jail Break</div>
@@ -2072,7 +2090,10 @@ document.addEventListener('change', e => {
 });
 document.addEventListener('input', e => {
   if(e.target.id === 'cs') updateSys();
-  if(e.target.id === 'code') e.target.value = e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '');
+  if(e.target.id === 'code'){
+    e.target.value = e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '');
+    const jb = $('joinBtn'); if(jb) jb.disabled = e.target.value.length !== 5;
+  }
 });
 document.addEventListener('keydown', e => {
   if(e.key === 'Enter' && e.target.id === 'code') doJoin();
